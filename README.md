@@ -16,7 +16,7 @@ Key file:
 
 Other useful references:
 
-- `wyrdlight.txt` — a tiny summary of the 3-stage behavior.
+- `WYRDLIGHT.md` — a tiny summary of the 3-stage behavior.
 - `index.html` — earlier prototype(s) / experimentation.
 
 ## How We’re Tackling The Problem
