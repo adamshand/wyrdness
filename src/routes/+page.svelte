@@ -458,20 +458,21 @@
 			ctx.filter = 'none';
 		}
 
-		// Stage 3: subtle iridescent sheen, not full rainbow.
+		// Stage 3: very subtle internal iridescence (kept minimal).
+		// Pearson correlation is expressed primarily as a pearly ring (outside the orb).
 		if (sheen > 0) {
 			ctx.globalCompositeOperation = 'screen';
-			ctx.globalAlpha = 0.14 * sheen;
+			ctx.globalAlpha = 0.08 * sheen * raw.pearson;
 			ctx.filter = `blur(${Math.max(18, 22 + 16 * brightness)}px)`;
 
 			const maybeConic = (ctx as unknown as { createConicGradient?: (a: number, x: number, y: number) => CanvasGradient }).createConicGradient;
 			if (typeof maybeConic === 'function') {
-				const cg = maybeConic.call(ctx, t * 0.12, cx, cy);
-				cg.addColorStop(0.0, 'rgba(255, 120, 170, 0.55)');
-				cg.addColorStop(0.28, 'rgba(255, 210, 140, 0.55)');
-				cg.addColorStop(0.5, 'rgba(140, 255, 210, 0.55)');
-				cg.addColorStop(0.7, 'rgba(140, 170, 255, 0.55)');
-				cg.addColorStop(1.0, 'rgba(255, 120, 170, 0.55)');
+				const cg = maybeConic.call(ctx, t * 0.08, cx, cy);
+				cg.addColorStop(0.0, 'rgba(255, 170, 210, 0.55)');
+				cg.addColorStop(0.3, 'rgba(255, 235, 180, 0.55)');
+				cg.addColorStop(0.55, 'rgba(180, 255, 235, 0.55)');
+				cg.addColorStop(0.78, 'rgba(175, 200, 255, 0.55)');
+				cg.addColorStop(1.0, 'rgba(255, 170, 210, 0.55)');
 				ctx.fillStyle = cg;
 				ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 			}
@@ -481,6 +482,63 @@
 		}
 
 		ctx.restore();
+
+		// Pearson: pearly ring around the orb. Visible in all stages.
+		{
+			const p = raw.pearson;
+			const pStrength = smoothstep(0.08, 0.85, p);
+			if (pStrength > 0.001) {
+				const sign = pearsonR >= 0 ? 1 : -1;
+				const ringPhase = t * 0.06 * sign;
+
+				const outerR = r * 1.05;
+				const innerR = r * 0.93;
+				const ringBlur = Math.max(10, 14 + 14 * pStrength + 6 * brightness);
+
+				ctx.save();
+				ctx.globalCompositeOperation = 'screen';
+				ctx.globalAlpha = (0.06 + 0.14 * pStrength) * (0.55 + 0.45 * stageEnergy);
+				ctx.filter = `blur(${ringBlur}px)`;
+
+				ctx.beginPath();
+				ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
+				ctx.arc(cx, cy, innerR, 0, Math.PI * 2, true);
+				ctx.closePath();
+				ctx.clip();
+
+				const maybeConic = (ctx as unknown as { createConicGradient?: (a: number, x: number, y: number) => CanvasGradient }).createConicGradient;
+				if (typeof maybeConic === 'function') {
+					const cg = maybeConic.call(ctx, ringPhase, cx, cy);
+					cg.addColorStop(0.0, 'rgba(255, 230, 245, 0.75)');
+					cg.addColorStop(0.18, 'rgba(220, 245, 255, 0.75)');
+					cg.addColorStop(0.36, 'rgba(255, 245, 215, 0.75)');
+					cg.addColorStop(0.56, 'rgba(225, 255, 235, 0.75)');
+					cg.addColorStop(0.78, 'rgba(235, 230, 255, 0.75)');
+					cg.addColorStop(1.0, 'rgba(255, 230, 245, 0.75)');
+					ctx.fillStyle = cg;
+					ctx.fillRect(cx - outerR - 2, cy - outerR - 2, (outerR + 2) * 2, (outerR + 2) * 2);
+				} else {
+					// Fallback: soft pearly highlight using two opposing gradients.
+					const g1 = ctx.createLinearGradient(cx - outerR, cy - outerR, cx + outerR, cy + outerR);
+					g1.addColorStop(0, 'rgba(255,240,250,0.55)');
+					g1.addColorStop(0.5, 'rgba(200,240,255,0.35)');
+					g1.addColorStop(1, 'rgba(240,255,220,0.45)');
+					ctx.fillStyle = g1;
+					ctx.fillRect(cx - outerR - 2, cy - outerR - 2, (outerR + 2) * 2, (outerR + 2) * 2);
+				}
+
+				// Ring shading to keep it subtle and dimensional.
+				ctx.globalCompositeOperation = 'multiply';
+				ctx.globalAlpha = 0.22 * pStrength;
+				const shade = ctx.createRadialGradient(cx, cy, innerR * 0.9, cx, cy, outerR);
+				shade.addColorStop(0, 'rgba(0,0,0,0.0)');
+				shade.addColorStop(1, 'rgba(0,0,0,0.55)');
+				ctx.fillStyle = shade;
+				ctx.fillRect(cx - outerR - 2, cy - outerR - 2, (outerR + 2) * 2, (outerR + 2) * 2);
+
+				ctx.restore();
+			}
+		}
 
 		// Orb rim glow and outer bloom.
 		ctx.globalCompositeOperation = 'screen';
@@ -530,6 +588,10 @@
 
 		if (e.key === 'h' || e.key === 'H') {
 			showHud = !showHud;
+			return;
+		}
+		if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+			showHud = true;
 			return;
 		}
 		if (e.key === 's' || e.key === 'S') {
@@ -625,6 +687,10 @@
 				<span class="v">{dominant === 'baseline' ? 'Baseline' : palette[dominant].name}</span>
 			</div>
 			<div class="hud-row">
+				<span class="k">Preset</span>
+				<span class="v">{preset === 'custom' ? 'Custom' : presets[preset].label}</span>
+			</div>
+			<div class="hud-row">
 				<span class="k">Coherence</span>
 				<span class="v">{Math.round(stageEnergy * 100)}%</span>
 			</div>
@@ -660,7 +726,7 @@
 					<div class="legend-row"><span class="swatch" style={`--h:${palette.correlated.hue}`}></span> Teal: Correlated drift</div>
 					<div class="legend-row"><span class="swatch" style={`--h:${palette.anti.hue}`}></span> Ember: Anti-correlated drift</div>
 					<div class="legend-row"><span class="swatch" style={`--h:${palette.stick.hue}`}></span> Green: “Stick together” (rarer)</div>
-					<div class="legend-row"><span class="swatch" style={`--h:${palette.pearson.hue}`}></span> Indigo: Pearson correlation (drives Stage 3 sheen)</div>
+					<div class="legend-row"><span class="swatch" style={`--h:${palette.pearson.hue}`}></span> Pearl ring: Pearson correlation (direction flips with +/-)</div>
 				</div>
 			{/if}
 
@@ -713,10 +779,10 @@
 						<input bind:value={renderScale} type="range" min="0.45" max="1" step="0.05" />
 						<span class="mono">{renderScale.toFixed(2)}</span>
 					</label>
-					<div class="hint mono">Hotkeys: H HUD, S settings, L legend, R reset, F fullscreen</div>
+					<div class="hint mono">Hotkeys: H HUD, ? show HUD, S settings, L legend, R reset, F fullscreen</div>
 				</div>
 			{:else}
-				<div class="hint mono">Hotkeys: H HUD, S settings, L legend, R reset, F fullscreen</div>
+				<div class="hint mono">Hotkeys: H HUD, ? show HUD, S settings, L legend, R reset, F fullscreen</div>
 			{/if}
 		</section>
 	{/if}
