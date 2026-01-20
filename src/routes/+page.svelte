@@ -34,6 +34,10 @@
 	let zA = $state(0);
 	let zB = $state(0);
 	let pearsonR = $state(0);
+	let pearsonSpin = $state(0);
+	let pearsonDir = $state<1 | -1>(1);
+	let pearsonPhase = $state(0);
+	let pearsonFlip = $state(0);
 	let zAgree = $state(0);
 
 	let dominant = $state<Channel>('baseline');
@@ -137,6 +141,10 @@
 		zA = 0;
 		zB = 0;
 		pearsonR = 0;
+		pearsonSpin = 0;
+		pearsonDir = 1;
+		pearsonPhase = 0;
+		pearsonFlip = 0;
 		zAgree = 0;
 
 		coherence = 0;
@@ -248,6 +256,7 @@
 			return;
 		}
 
+
 		bitBudget -= chunk;
 
 		const aBits = randBits(chunk);
@@ -314,24 +323,74 @@
 		};
 		rawLast = raw;
 
+		// Pearson motion: always drifting a little, speeds up with |pearson|.
+		// Direction flips with the sign (with hysteresis so it feels intentional).
+		{
+			const dt = dtMs / 1000;
+			const spinTau = 900;
+			const sk = 1 - Math.exp(-dtMs / spinTau);
+			pearsonSpin = pearsonSpin + (pearsonR - pearsonSpin) * sk;
+
+			// During boot we keep motion alive but avoid dramatic flips.
+			const bootT = clamp01(bootMs / 5000);
+			const bootLock = bootT < 1;
+
+			if (!bootLock) {
+				const flipThreshold = 0.055;
+				let nextDir = pearsonDir;
+				if (pearsonDir === 1 && pearsonSpin < -flipThreshold) nextDir = -1;
+				if (pearsonDir === -1 && pearsonSpin > flipThreshold) nextDir = 1;
+				if (nextDir !== pearsonDir) {
+					pearsonDir = nextDir;
+					pearsonFlip = 1;
+				}
+			} else {
+				pearsonDir = 1;
+			}
+
+			// fade flip accent
+			pearsonFlip *= Math.exp(-dtMs / 650);
+
+			const mag = Math.min(1, Math.abs(pearsonSpin));
+			const baseSpeed = 0.03;
+			const gain = 0.26;
+			const speed = baseSpeed + gain * Math.pow(mag, 0.82);
+			pearsonPhase = wrapHue(pearsonPhase + pearsonDir * speed * 360 * dt);
+		}
+
+		// Boot lockout: for the first 5s, keep dominance/stage pinned so startup is clear.
+		const bootT = clamp01(bootMs / 5000);
+		const bootLock = bootT < 1;
+
+		if (!bootLock) {
+			updateDominant(raw, dtMs);
+		} else {
+			dominant = 'baseline';
+			dominance = 0;
+		}
+
 		// Smoothly blend hue targets so channel changes aren't jarring.
 		const baseHue = dominant === 'baseline' ? 205 : palette[dominant].hue;
 		const hueTau = 1600;
 		const hk = 1 - Math.exp(-dtMs / hueTau);
 		hueSmooth = hueApproach(hueSmooth, baseHue, hk);
 
-		updateDominant(raw, dtMs);
-
 		// Coherence is an overall envelope used for stage logic.
 		const base = Math.max(raw.correlated, raw.anti, raw.stick, raw.pearson);
 		coherence = base;
 
-		const riseMs = 2600;
-		const fallMs = 4200;
-		const tau = coherence > stageEnergy ? riseMs : fallMs;
-		const k = 1 - Math.exp(-dtMs / tau);
-		stageEnergy = stageEnergy + (coherence - stageEnergy) * k;
-		stage = computeStageFromEnergy(stageEnergy, stage);
+		if (bootLock) {
+			coherence = 0;
+			stageEnergy = 0;
+			stage = 1;
+		} else {
+			const riseMs = 2600;
+			const fallMs = 4200;
+			const tau = coherence > stageEnergy ? riseMs : fallMs;
+			const k = 1 - Math.exp(-dtMs / tau);
+			stageEnergy = stageEnergy + (coherence - stageEnergy) * k;
+			stage = computeStageFromEnergy(stageEnergy, stage);
+		}
 
 		render(raw);
 	}
@@ -355,14 +414,17 @@
 			ctx.fillRect(0, 0, w, h);
 		}
 
-		const e = stageEnergy;
 		const bootT = clamp01(bootMs / 5000);
-		const bootMix = 1 - bootT;
+		const bootLock = bootT < 1;
+		const e = stageEnergy;
 
 		// Lamp geometry.
 		const cx = w * 0.5;
 		const cy = h * 0.54;
-		const r = Math.min(w, h) * 0.42;
+		const rFull = Math.min(w, h) * 0.42;
+		// Boot: CRT-like dot that expands into the full orb.
+		const rBoot = rFull * (0.06 + 0.94 * smoothstep(0, 1, bootT));
+		const r = bootLock ? rBoot : rFull;
 
 		// Pick a single hue family (smoothed across switches).
 		let hue = hueSmooth;
@@ -434,24 +496,37 @@
 			ctx.filter = 'none';
 		}
 
-		// Boot: subtle rainbow wash inside the orb for ~5 seconds.
-		if (bootMix > 0.001) {
+		// Boot: CRT-like creamy ignition, confined to the (growing) orb.
+		if (bootLock) {
+			const ignition = 1 - bootT;
 			ctx.globalCompositeOperation = 'screen';
-			ctx.globalAlpha = 0.28 * bootMix;
+			ctx.globalAlpha = 0.55 * ignition;
 			ctx.filter = 'blur(22px)';
 
-			const maybeConic = (ctx as unknown as { createConicGradient?: (a: number, x: number, y: number) => CanvasGradient }).createConicGradient;
-			if (typeof maybeConic === 'function') {
-				const cg = maybeConic.call(ctx, t * 0.22, cx, cy);
-				cg.addColorStop(0.0, 'rgba(255, 90, 120, 0.9)');
-				cg.addColorStop(0.18, 'rgba(255, 170, 80, 0.9)');
-				cg.addColorStop(0.36, 'rgba(180, 255, 120, 0.9)');
-				cg.addColorStop(0.55, 'rgba(80, 220, 255, 0.9)');
-				cg.addColorStop(0.72, 'rgba(140, 120, 255, 0.9)');
-				cg.addColorStop(0.88, 'rgba(255, 90, 220, 0.9)');
-				cg.addColorStop(1.0, 'rgba(255, 90, 120, 0.9)');
-				ctx.fillStyle = cg;
+			// Creamy, CRT-ish activation glow: warm-white core with a faint cool fringe.
+			{
+				ctx.filter = 'blur(18px)';
+				const g = ctx.createRadialGradient(cx, cy, r * 0.02, cx, cy, r);
+				g.addColorStop(0, `rgba(255, 245, 232, ${0.85 * ignition})`);
+				g.addColorStop(0.18, `rgba(255, 238, 218, ${0.50 * ignition})`);
+				g.addColorStop(0.55, `rgba(220, 240, 255, ${0.22 * ignition})`);
+				g.addColorStop(1, 'rgba(255,255,255,0)');
+				ctx.fillStyle = g;
 				ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+			}
+
+			// Subtle horizontal "scan" line that expands with the dot (modern CRT nod).
+			{
+				ctx.filter = 'blur(10px)';
+				ctx.globalAlpha = 0.28 * ignition;
+				const bandH = Math.max(2, r * (0.05 + 0.03 * (1 - bootT)));
+				const lg = ctx.createLinearGradient(cx - r, cy - bandH, cx + r, cy + bandH);
+				lg.addColorStop(0, 'rgba(255, 245, 232, 0)');
+				lg.addColorStop(0.5, 'rgba(255, 245, 232, 0.85)');
+				lg.addColorStop(1, 'rgba(255, 245, 232, 0)');
+				ctx.fillStyle = lg;
+				ctx.fillRect(cx - r, cy - bandH, r * 2, bandH * 2);
+				ctx.globalAlpha = 1;
 			}
 
 			ctx.globalAlpha = 1;
@@ -462,12 +537,12 @@
 		// Pearson correlation is expressed primarily as a pearly ring (outside the orb).
 		if (sheen > 0) {
 			ctx.globalCompositeOperation = 'screen';
-			ctx.globalAlpha = 0.08 * sheen * raw.pearson;
-			ctx.filter = `blur(${Math.max(18, 22 + 16 * brightness)}px)`;
+			ctx.globalAlpha = (0.06 * sheen * raw.pearson) * (1 + 0.6 * pearsonFlip);
+			ctx.filter = `blur(${Math.max(16, 22 + 14 * brightness - 6 * pearsonFlip)}px)`;
 
 			const maybeConic = (ctx as unknown as { createConicGradient?: (a: number, x: number, y: number) => CanvasGradient }).createConicGradient;
 			if (typeof maybeConic === 'function') {
-				const cg = maybeConic.call(ctx, t * 0.08, cx, cy);
+				const cg = maybeConic.call(ctx, (pearsonPhase / 360) * Math.PI * 2, cx, cy);
 				cg.addColorStop(0.0, 'rgba(255, 170, 210, 0.55)');
 				cg.addColorStop(0.3, 'rgba(255, 235, 180, 0.55)');
 				cg.addColorStop(0.55, 'rgba(180, 255, 235, 0.55)');
@@ -485,11 +560,11 @@
 
 		// Pearson: pearly ring around the orb. Visible in all stages.
 		{
-			const p = raw.pearson;
-			const pStrength = smoothstep(0.08, 0.85, p);
-			if (pStrength > 0.001) {
-				const sign = pearsonR >= 0 ? 1 : -1;
-				const ringPhase = t * 0.06 * sign;
+				const p = raw.pearson;
+				const pStrength = smoothstep(0.06, 0.8, p);
+				if (pStrength > 0.001) {
+					const ringPhase = (pearsonPhase / 360) * Math.PI * 2;
+
 
 				const outerR = r * 1.05;
 				const innerR = r * 0.93;
@@ -497,8 +572,8 @@
 
 				ctx.save();
 				ctx.globalCompositeOperation = 'screen';
-				ctx.globalAlpha = (0.06 + 0.14 * pStrength) * (0.55 + 0.45 * stageEnergy);
-				ctx.filter = `blur(${ringBlur}px)`;
+				ctx.globalAlpha = (0.06 + 0.18 * pStrength) * (0.5 + 0.5 * stageEnergy) * (1 + 0.45 * pearsonFlip);
+				ctx.filter = `blur(${Math.max(8, ringBlur - 6 * pearsonFlip)}px)`;
 
 				ctx.beginPath();
 				ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
