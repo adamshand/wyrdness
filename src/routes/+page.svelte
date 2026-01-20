@@ -15,7 +15,10 @@
 	let bitsPerSec = $state(1600);
 
 	type Preset = 'fast' | 'medium' | 'slow' | 'custom';
-	const presets: Record<Exclude<Preset, 'custom'>, { windowBits: number; bitsPerSec: number; label: string; note: string }> = {
+	const presets: Record<
+		Exclude<Preset, 'custom'>,
+		{ windowBits: number; bitsPerSec: number; label: string; note: string }
+	> = {
 		fast: { windowBits: 4000, bitsPerSec: 2400, label: 'Fast', note: 'Livelier' },
 		medium: { windowBits: 6000, bitsPerSec: 1200, label: 'Medium', note: 'Balanced' },
 		slow: { windowBits: 12000, bitsPerSec: 350, label: 'Slow', note: 'Ceremonial' }
@@ -28,6 +31,9 @@
 	let stage = $state<Stage>(1);
 	let stageEnergy = $state(0);
 	let coherence = $state(0);
+
+	// Visual indicator of "how unlikely" the current anomaly is (0..1).
+	let sigEnergy = $state(0);
 
 	let hueSmooth = $state(205);
 
@@ -101,6 +107,30 @@
 		return wrapHue(c + d * k);
 	}
 
+	function erfApprox(x: number) {
+		// Abramowitz & Stegun 7.1.26
+		const sign = x < 0 ? -1 : 1;
+		const ax = Math.abs(x);
+		const t = 1 / (1 + 0.3275911 * ax);
+		const a1 = 0.254829592;
+		const a2 = -0.284496736;
+		const a3 = 1.421413741;
+		const a4 = -1.453152027;
+		const a5 = 1.061405429;
+		const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
+		return sign * y;
+	}
+
+	function normalCdf(x: number) {
+		return 0.5 * (1 + erfApprox(x / Math.SQRT2));
+	}
+
+	function twoSidedPFromZ(z: number) {
+		const az = Math.abs(z);
+		const tail = 1 - normalCdf(az);
+		return Math.max(1e-18, Math.min(1, 2 * tail));
+	}
+
 	function applyPreset(p: Exclude<Preset, 'custom'>) {
 		preset = p;
 		windowBits = presets[p].windowBits;
@@ -149,6 +179,7 @@
 
 		coherence = 0;
 		stageEnergy = 0;
+		sigEnergy = 0;
 		stage = 1;
 		bitBudget = 0;
 
@@ -229,7 +260,8 @@
 		if (dominant !== 'baseline') currentStrength = raw[dominant] ?? 0;
 		currentStrength += keepBonus;
 
-		const shouldSwitch = dominant === 'baseline' ? next !== 'baseline' : nextStrength > currentStrength + switchMargin;
+		const shouldSwitch =
+			dominant === 'baseline' ? next !== 'baseline' : nextStrength > currentStrength + switchMargin;
 
 		// dominance is a slow envelope to avoid sudden hue changes.
 		const target = next === 'baseline' ? 0 : nextStrength;
@@ -255,7 +287,6 @@
 			render(rawLast);
 			return;
 		}
-
 
 		bitBudget -= chunk;
 
@@ -382,6 +413,7 @@
 		if (bootLock) {
 			coherence = 0;
 			stageEnergy = 0;
+			sigEnergy = 0;
 			stage = 1;
 		} else {
 			const riseMs = 2600;
@@ -390,6 +422,33 @@
 			const k = 1 - Math.exp(-dtMs / tau);
 			stageEnergy = stageEnergy + (coherence - stageEnergy) * k;
 			stage = computeStageFromEnergy(stageEnergy, stage);
+
+			// Approximate statistical unlikeliness of the strongest channel (artist-friendly).
+			// This is not their patented random-walk segmentation; it's a smooth, intuitive proxy.
+			const corrZ = corrRaw > 0 ? Math.min(Math.abs(zA), Math.abs(zB)) : 0;
+			const antiZ = antiRaw > 0 ? Math.min(Math.abs(zA), Math.abs(zB)) : 0;
+			const stickZ = stickRaw > 0 ? Math.abs(zAgree) : 0;
+
+			// Fisher z-transform gives an approximately-normal score for correlation.
+			const rClamped = Math.max(-0.999999, Math.min(0.999999, pearsonR));
+			const fisher =
+				0.5 * Math.log((1 + rClamped) / (1 - rClamped)) * Math.sqrt(Math.max(1, windowBits - 3));
+			const pearsonZ = pearsonRaw > 0 ? Math.abs(fisher) : 0;
+
+			const pCorr = corrZ > 0 ? twoSidedPFromZ(corrZ) : 1;
+			const pAnti = antiZ > 0 ? twoSidedPFromZ(antiZ) : 1;
+			const pStick = stickZ > 0 ? twoSidedPFromZ(stickZ) : 1;
+			const pPearson = pearsonZ > 0 ? twoSidedPFromZ(pearsonZ) : 1;
+
+			const pOverall = Math.min(pCorr, pAnti, pStick, pPearson);
+			const surprisal = Math.min(6, -Math.log10(pOverall));
+			const targetSig = clamp01((surprisal - 0.8) / 4.8);
+
+			const sigRiseMs = 1400;
+			const sigFallMs = 2600;
+			const sigTau = targetSig > sigEnergy ? sigRiseMs : sigFallMs;
+			const sk = 1 - Math.exp(-dtMs / sigTau);
+			sigEnergy = sigEnergy + (targetSig - sigEnergy) * sk;
 		}
 
 		render(raw);
@@ -461,9 +520,18 @@
 		// Main body color.
 		{
 			const g = ctx.createRadialGradient(cx + ox, cy + oy, r * 0.1, cx, cy, r);
-			g.addColorStop(0, `hsla(${hue} ${sat}% ${Math.round(56 - 10 * whiten)}% / ${0.95 * orbAlpha})`);
-			g.addColorStop(0.55, `hsla(${hue} ${sat}% ${Math.round(44 - 12 * whiten)}% / ${0.55 * orbAlpha})`);
-			g.addColorStop(1, `hsla(${hue} ${Math.round(sat * 0.7)}% ${Math.round(22 - 10 * whiten)}% / ${0.12 * orbAlpha})`);
+			g.addColorStop(
+				0,
+				`hsla(${hue} ${sat}% ${Math.round(56 - 10 * whiten)}% / ${0.95 * orbAlpha})`
+			);
+			g.addColorStop(
+				0.55,
+				`hsla(${hue} ${sat}% ${Math.round(44 - 12 * whiten)}% / ${0.55 * orbAlpha})`
+			);
+			g.addColorStop(
+				1,
+				`hsla(${hue} ${Math.round(sat * 0.7)}% ${Math.round(22 - 10 * whiten)}% / ${0.12 * orbAlpha})`
+			);
 			ctx.fillStyle = g;
 			ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 		}
@@ -475,9 +543,18 @@
 			const g2 = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
 			const hue2 = (hue + 28 + 22 * Math.sin(t * 0.12)) % 360;
 			const hue3 = (hue - 24 + 18 * Math.sin(t * 0.09 + 1.1)) % 360;
-			g2.addColorStop(0, `hsla(${hue2} ${Math.round(sat * 0.9)}% ${Math.round(55 - 8 * whiten)}% / ${0.22 * orbAlpha})`);
-			g2.addColorStop(0.55, `hsla(${hue3} ${Math.round(sat * 0.75)}% ${Math.round(48 - 10 * whiten)}% / ${0.18 * orbAlpha})`);
-			g2.addColorStop(1, `hsla(${hue2} ${Math.round(sat * 0.7)}% ${Math.round(46 - 10 * whiten)}% / ${0.12 * orbAlpha})`);
+			g2.addColorStop(
+				0,
+				`hsla(${hue2} ${Math.round(sat * 0.9)}% ${Math.round(55 - 8 * whiten)}% / ${0.22 * orbAlpha})`
+			);
+			g2.addColorStop(
+				0.55,
+				`hsla(${hue3} ${Math.round(sat * 0.75)}% ${Math.round(48 - 10 * whiten)}% / ${0.18 * orbAlpha})`
+			);
+			g2.addColorStop(
+				1,
+				`hsla(${hue2} ${Math.round(sat * 0.7)}% ${Math.round(46 - 10 * whiten)}% / ${0.12 * orbAlpha})`
+			);
 			ctx.fillStyle = g2;
 			ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 		}
@@ -489,11 +566,33 @@
 			ctx.filter = `blur(${Math.max(14, 18 + 24 * brightness)}px)`;
 			const wg = ctx.createRadialGradient(cx, cy, r * 0.05, cx, cy, r);
 			wg.addColorStop(0, `rgba(255,255,255,${0.36 * whiten * orbAlpha})`);
-			wg.addColorStop(0.55, `rgba(255,255,255,${0.10 * whiten * orbAlpha})`);
+			wg.addColorStop(0.55, `rgba(255,255,255,${0.1 * whiten * orbAlpha})`);
 			wg.addColorStop(1, 'rgba(255,255,255,0)');
 			ctx.fillStyle = wg;
 			ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 			ctx.filter = 'none';
+		}
+
+		// Significance core: creamy-white central light that grows with "unlikeliness".
+		if (!bootLock && sigEnergy > 0.001) {
+			const s = Math.pow(sigEnergy, 0.85);
+			const coreR = r * (0.06 + 0.34 * s);
+			const coreBlur = Math.max(10, 24 - 10 * s + 8 * brightness);
+
+			ctx.save();
+			ctx.globalCompositeOperation = 'screen';
+			ctx.globalAlpha = (0.06 + 0.38 * s) * (0.75 + 0.25 * brightness);
+			ctx.filter = `blur(${coreBlur}px)`;
+
+			const cg = ctx.createRadialGradient(cx, cy, coreR * 0.05, cx, cy, coreR);
+			cg.addColorStop(0, 'rgba(255, 245, 232, 0.95)');
+			cg.addColorStop(0.22, 'rgba(255, 238, 218, 0.65)');
+			cg.addColorStop(0.55, 'rgba(220, 240, 255, 0.22)');
+			cg.addColorStop(1, 'rgba(255, 255, 255, 0)');
+			ctx.fillStyle = cg;
+			ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+			ctx.restore();
 		}
 
 		// Boot: CRT-like creamy ignition, confined to the (growing) orb.
@@ -508,7 +607,7 @@
 				ctx.filter = 'blur(18px)';
 				const g = ctx.createRadialGradient(cx, cy, r * 0.02, cx, cy, r);
 				g.addColorStop(0, `rgba(255, 245, 232, ${0.85 * ignition})`);
-				g.addColorStop(0.18, `rgba(255, 238, 218, ${0.50 * ignition})`);
+				g.addColorStop(0.18, `rgba(255, 238, 218, ${0.5 * ignition})`);
 				g.addColorStop(0.55, `rgba(220, 240, 255, ${0.22 * ignition})`);
 				g.addColorStop(1, 'rgba(255,255,255,0)');
 				ctx.fillStyle = g;
@@ -537,10 +636,14 @@
 		// Pearson correlation is expressed primarily as a pearly ring (outside the orb).
 		if (sheen > 0) {
 			ctx.globalCompositeOperation = 'screen';
-			ctx.globalAlpha = (0.06 * sheen * raw.pearson) * (1 + 0.6 * pearsonFlip);
+			ctx.globalAlpha = 0.06 * sheen * raw.pearson * (1 + 0.6 * pearsonFlip);
 			ctx.filter = `blur(${Math.max(16, 22 + 14 * brightness - 6 * pearsonFlip)}px)`;
 
-			const maybeConic = (ctx as unknown as { createConicGradient?: (a: number, x: number, y: number) => CanvasGradient }).createConicGradient;
+			const maybeConic = (
+				ctx as unknown as {
+					createConicGradient?: (a: number, x: number, y: number) => CanvasGradient;
+				}
+			).createConicGradient;
 			if (typeof maybeConic === 'function') {
 				const cg = maybeConic.call(ctx, (pearsonPhase / 360) * Math.PI * 2, cx, cy);
 				cg.addColorStop(0.0, 'rgba(255, 170, 210, 0.55)');
@@ -560,11 +663,10 @@
 
 		// Pearson: pearly ring around the orb. Visible in all stages.
 		{
-				const p = raw.pearson;
-				const pStrength = smoothstep(0.06, 0.8, p);
-				if (pStrength > 0.001) {
-					const ringPhase = (pearsonPhase / 360) * Math.PI * 2;
-
+			const p = raw.pearson;
+			const pStrength = smoothstep(0.06, 0.8, p);
+			if (pStrength > 0.001) {
+				const ringPhase = (pearsonPhase / 360) * Math.PI * 2;
 
 				const outerR = r * 1.05;
 				const innerR = r * 0.93;
@@ -572,7 +674,8 @@
 
 				ctx.save();
 				ctx.globalCompositeOperation = 'screen';
-				ctx.globalAlpha = (0.06 + 0.18 * pStrength) * (0.5 + 0.5 * stageEnergy) * (1 + 0.45 * pearsonFlip);
+				ctx.globalAlpha =
+					(0.06 + 0.18 * pStrength) * (0.5 + 0.5 * stageEnergy) * (1 + 0.45 * pearsonFlip);
 				ctx.filter = `blur(${Math.max(8, ringBlur - 6 * pearsonFlip)}px)`;
 
 				ctx.beginPath();
@@ -581,7 +684,11 @@
 				ctx.closePath();
 				ctx.clip();
 
-				const maybeConic = (ctx as unknown as { createConicGradient?: (a: number, x: number, y: number) => CanvasGradient }).createConicGradient;
+				const maybeConic = (
+					ctx as unknown as {
+						createConicGradient?: (a: number, x: number, y: number) => CanvasGradient;
+					}
+				).createConicGradient;
 				if (typeof maybeConic === 'function') {
 					const cg = maybeConic.call(ctx, ringPhase, cx, cy);
 					cg.addColorStop(0.0, 'rgba(255, 230, 245, 0.75)');
@@ -631,7 +738,14 @@
 		// Vignette.
 		ctx.globalCompositeOperation = 'source-over';
 		{
-			const vg = ctx.createRadialGradient(cx, cy, Math.min(w, h) * 0.2, cx, cy, Math.max(w, h) * 0.78);
+			const vg = ctx.createRadialGradient(
+				cx,
+				cy,
+				Math.min(w, h) * 0.2,
+				cx,
+				cy,
+				Math.max(w, h) * 0.78
+			);
 			vg.addColorStop(0, 'rgba(0,0,0,0)');
 			vg.addColorStop(1, 'rgba(0,0,0,0.66)');
 			ctx.fillStyle = vg;
@@ -659,7 +773,12 @@
 
 	function handleKeydown(e: KeyboardEvent) {
 		const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
-		if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement | null)?.isContentEditable) return;
+		if (
+			tag === 'input' ||
+			tag === 'textarea' ||
+			(e.target as HTMLElement | null)?.isContentEditable
+		)
+			return;
 
 		if (e.key === 'h' || e.key === 'H') {
 			showHud = !showHud;
@@ -737,8 +856,15 @@
 
 	$effect(() => {
 		// If the user drags sliders away from preset values, mark as custom.
-		const isMatch = (p: Exclude<Preset, 'custom'>) => windowBits === presets[p].windowBits && bitsPerSec === presets[p].bitsPerSec;
-		preset = isMatch('fast') ? 'fast' : isMatch('medium') ? 'medium' : isMatch('slow') ? 'slow' : 'custom';
+		const isMatch = (p: Exclude<Preset, 'custom'>) =>
+			windowBits === presets[p].windowBits && bitsPerSec === presets[p].bitsPerSec;
+		preset = isMatch('fast')
+			? 'fast'
+			: isMatch('medium')
+				? 'medium'
+				: isMatch('slow')
+					? 'slow'
+					: 'custom';
 	});
 
 	$effect(() => {
@@ -791,17 +917,31 @@
 			</div>
 
 			<div class="hud-actions">
-				<button class="hud-btn" type="button" onclick={() => (showLegend = !showLegend)} title="Toggle legend (L)">
+				<button
+					class="hud-btn"
+					type="button"
+					onclick={() => (showLegend = !showLegend)}
+					title="Toggle legend (L)"
+				>
 					Legend
 				</button>
 			</div>
 
 			{#if showLegend}
 				<div class="legend">
-					<div class="legend-row"><span class="swatch" style={`--h:${palette.correlated.hue}`}></span> Teal: Correlated drift</div>
-					<div class="legend-row"><span class="swatch" style={`--h:${palette.anti.hue}`}></span> Ember: Anti-correlated drift</div>
-					<div class="legend-row"><span class="swatch" style={`--h:${palette.stick.hue}`}></span> Green: “Stick together” (rarer)</div>
-					<div class="legend-row"><span class="swatch" style={`--h:${palette.pearson.hue}`}></span> Pearl ring: Pearson correlation (direction flips with +/-)</div>
+					<div class="legend-row">
+						<span class="swatch" style={`--h:${palette.correlated.hue}`}></span> Teal: Correlated drift
+					</div>
+					<div class="legend-row">
+						<span class="swatch" style={`--h:${palette.anti.hue}`}></span> Ember: Anti-correlated drift
+					</div>
+					<div class="legend-row">
+						<span class="swatch" style={`--h:${palette.stick.hue}`}></span> Green: “Stick together” (rarer)
+					</div>
+					<div class="legend-row">
+						<span class="swatch" style={`--h:${palette.pearson.hue}`}></span> Pearl ring: Pearson correlation
+						(direction flips with +/-)
+					</div>
 				</div>
 			{/if}
 
@@ -841,7 +981,7 @@
 					</label>
 					<label>
 						<span>Bits/sec</span>
-							<input bind:value={bitsPerSec} type="range" min="20" max="6000" step="10" />
+						<input bind:value={bitsPerSec} type="range" min="20" max="6000" step="10" />
 						<span class="mono">{bitsPerSec}</span>
 					</label>
 					<label>
@@ -854,10 +994,14 @@
 						<input bind:value={renderScale} type="range" min="0.45" max="1" step="0.05" />
 						<span class="mono">{renderScale.toFixed(2)}</span>
 					</label>
-					<div class="hint mono">Hotkeys: H HUD, ? show HUD, S settings, L legend, R reset, F fullscreen</div>
+					<div class="hint mono">
+						Hotkeys: H HUD, ? show HUD, S settings, L legend, R reset, F fullscreen
+					</div>
 				</div>
 			{:else}
-				<div class="hint mono">Hotkeys: H HUD, ? show HUD, S settings, L legend, R reset, F fullscreen</div>
+				<div class="hint mono">
+					Hotkeys: H HUD, ? show HUD, S settings, L legend, R reset, F fullscreen
+				</div>
 			{/if}
 		</section>
 	{/if}
@@ -942,7 +1086,11 @@
 		width: 12px;
 		height: 12px;
 		border-radius: 999px;
-		background: radial-gradient(circle at 30% 30%, hsla(var(--h) 90% 70% / 0.95), hsla(var(--h) 90% 45% / 0.95));
+		background: radial-gradient(
+			circle at 30% 30%,
+			hsla(var(--h) 90% 70% / 0.95),
+			hsla(var(--h) 90% 45% / 0.95)
+		);
 		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
 		flex: 0 0 auto;
 	}
@@ -1027,7 +1175,9 @@
 	}
 
 	.mono {
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+			monospace;
 	}
 
 	.hint {
