@@ -10,21 +10,24 @@
 	let showSettings = $state(false);
 	let showLegend = $state(false);
 
-	// "Device-ish" defaults: they mention 200-bit samples, and a few 1000 bits/sec.
-	let windowBits = $state(6000);
-	let bitsPerSec = $state(1600);
+	// Device-ish defaults:
+	// - analysis uses 200-bit samples (A/B)
+	// - signal engine ticks at a human-ish cadence (updates/sec)
+	// - rendering stays on RAF; we interpolate between ticks
+	let sampleBits = $state(200);
+	let updatesPerSec = $state(1);
 
 	type Preset = 'fast' | 'medium' | 'slow' | 'custom';
 	const presets: Record<
 		Exclude<Preset, 'custom'>,
-		{ windowBits: number; bitsPerSec: number; label: string; note: string }
+		{ sampleBits: number; updatesPerSec: number; label: string; note: string }
 	> = {
-		fast: { windowBits: 4000, bitsPerSec: 2400, label: 'Fast', note: 'Livelier' },
-		medium: { windowBits: 6000, bitsPerSec: 1200, label: 'Medium', note: 'Balanced' },
-		slow: { windowBits: 12000, bitsPerSec: 350, label: 'Slow', note: 'Ceremonial' }
+		fast: { sampleBits: 200, updatesPerSec: 5, label: 'Fast', note: 'More reactive' },
+		medium: { sampleBits: 200, updatesPerSec: 2, label: 'Medium', note: 'Balanced' },
+		slow: { sampleBits: 200, updatesPerSec: 1, label: 'Slow', note: 'Mellow' }
 	};
-	let preset = $state<Preset>('medium');
-	let bitBudget = 0; // fractional bits accumulated between frames
+	let preset = $state<Preset>('slow');
+	let tickBudget = 0; // fractional analysis ticks accumulated between frames
 	let alpha = $state(0.08);
 	let renderScale = $state(0.75);
 
@@ -36,6 +39,9 @@
 	let sigEnergy = $state(0);
 
 	let hueSmooth = $state(205);
+	let satSmooth = $state(58);
+	let baselineHueTarget = $state(205);
+	let baselineHueNextAtMs = 0;
 
 	let zA = $state(0);
 	let zB = $state(0);
@@ -56,12 +62,17 @@
 
 	let bitsA: Uint8Array;
 	let bitsB: Uint8Array;
-	let idx = 0;
 	let onesA = 0;
 	let onesB = 0;
 	let agree = 0; // count of A==B in the window
 
 	let rawLast: Record<Exclude<Channel, 'baseline'>, number> = {
+		correlated: 0,
+		anti: 0,
+		stick: 0,
+		pearson: 0
+	};
+	let rawRender: Record<Exclude<Channel, 'baseline'>, number> = {
 		correlated: 0,
 		anti: 0,
 		stick: 0,
@@ -133,20 +144,17 @@
 
 	function applyPreset(p: Exclude<Preset, 'custom'>) {
 		preset = p;
-		windowBits = presets[p].windowBits;
-		bitsPerSec = presets[p].bitsPerSec;
+		sampleBits = presets[p].sampleBits;
+		updatesPerSec = presets[p].updatesPerSec;
+		reseed();
 	}
 
 	function reseed() {
-		// Important: keep the rolling-window aggregates consistent with the current buffer.
-		// If we start with empty aggregates but non-empty buffers (or vice versa), the first window
-		// produces huge z-scores and coherence pins at 100%.
-		const a0 = randBits(windowBits);
-		const b0 = randBits(windowBits);
-		bitsA = a0;
-		bitsB = b0;
+		// Keep buffers and aggregates consistent.
+		// This prevents a huge first z-score spike.
+		bitsA = randBits(sampleBits);
+		bitsB = randBits(sampleBits);
 
-		idx = 0;
 		onesA = 0;
 		onesB = 0;
 		agree = 0;
@@ -154,7 +162,7 @@
 		sumY = 0;
 		sumXY = 0;
 
-		for (let i = 0; i < windowBits; i++) {
+		for (let i = 0; i < sampleBits; i++) {
 			const a = bitsA[i];
 			const b = bitsB[i];
 			if (a === 1) onesA++;
@@ -181,7 +189,7 @@
 		stageEnergy = 0;
 		sigEnergy = 0;
 		stage = 1;
-		bitBudget = 0;
+		tickBudget = 0;
 
 		dominant = 'baseline';
 		dominance = 0;
@@ -273,61 +281,41 @@
 		if (dominant === 'baseline' && dominance < 0.05) dominant = 'baseline';
 	}
 
-	function step(dtMs: number) {
-		bootMs += dtMs;
+	function recomputeAggregatesFromBuffers() {
+		onesA = 0;
+		onesB = 0;
+		agree = 0;
+		sumX = 0;
+		sumY = 0;
+		sumXY = 0;
 
-		// Pull bits in chunks roughly like the device (200-bit samples),
-		// but allow low bps without forcing 200 bits every frame.
-		bitBudget += bitsPerSec * (dtMs / 1000);
-		let chunk = Math.floor(bitBudget);
-		chunk = Math.min(chunk, 4000); // cap per frame
-		chunk = Math.floor(chunk / 4) * 4; // align for byte extraction
+		for (let i = 0; i < sampleBits; i++) {
+			const a = bitsA[i];
+			const b = bitsB[i];
+			if (a === 1) onesA++;
+			if (b === 1) onesB++;
+			if (a === b) agree++;
 
-		if (chunk < 4) {
-			render(rawLast);
-			return;
+			const x = a === 1 ? 1 : -1;
+			const y = b === 1 ? 1 : -1;
+			sumX += x;
+			sumY += y;
+			sumXY += x * y;
 		}
+	}
 
-		bitBudget -= chunk;
+	function signalTick() {
+		// Replace the entire sample with fresh bits (200-bit chunks), then
+		// compute channel values. Rendering will interpolate between ticks.
+		bitsA = randBits(sampleBits);
+		bitsB = randBits(sampleBits);
+		recomputeAggregatesFromBuffers();
 
-		const aBits = randBits(chunk);
-		const bBits = randBits(chunk);
-
-		for (let i = 0; i < chunk; i++) {
-			const oldA = bitsA[idx];
-			const oldB = bitsB[idx];
-			const neuA = aBits[i];
-			const neuB = bBits[i];
-
-			if (oldA === 1) onesA--;
-			if (oldB === 1) onesB--;
-			if (oldA === oldB) agree--;
-
-			const oldX = oldA === 1 ? 1 : -1;
-			const oldY = oldB === 1 ? 1 : -1;
-			sumX -= oldX;
-			sumY -= oldY;
-			sumXY -= oldX * oldY;
-
-			if (neuA === 1) onesA++;
-			if (neuB === 1) onesB++;
-			if (neuA === neuB) agree++;
-
-			const newX = neuA === 1 ? 1 : -1;
-			const newY = neuB === 1 ? 1 : -1;
-			sumX += newX;
-			sumY += newY;
-			sumXY += newX * newY;
-
-			bitsA[idx] = neuA;
-			bitsB[idx] = neuB;
-			idx = (idx + 1) % windowBits;
-		}
-
-		const N = windowBits;
-		zA = alpha * zFromOnes(onesA, N) + (1 - alpha) * zA;
-		zB = alpha * zFromOnes(onesB, N) + (1 - alpha) * zB;
-		zAgree = alpha * zFromOnes(agree, N) + (1 - alpha) * zAgree;
+		// Z-scores and correlation for this sample.
+		const N = sampleBits;
+		const zAInst = zFromOnes(onesA, N);
+		const zBInst = zFromOnes(onesB, N);
+		const zAgreeInst = zFromOnes(agree, N);
 
 		const meanX = sumX / N;
 		const meanY = sumY / N;
@@ -335,36 +323,110 @@
 		const cov = exy - meanX * meanY;
 		const varX = Math.max(1e-6, 1 - meanX * meanX);
 		const varY = Math.max(1e-6, 1 - meanY * meanY);
-		const r = cov / Math.sqrt(varX * varY);
-		pearsonR = alpha * r + (1 - alpha) * pearsonR;
+		const rInst = cov / Math.sqrt(varX * varY);
+
+		// Smooth the reported stats just a bit so the HUD isn't twitchy.
+		const statsTau = 2800;
+		const statsDtMs = 1000 / Math.max(0.25, updatesPerSec);
+		const k = 1 - Math.exp(-statsDtMs / statsTau);
+		zA = zA + (zAInst - zA) * k;
+		zB = zB + (zBInst - zB) * k;
+		zAgree = zAgree + (zAgreeInst - zAgree) * k;
+		pearsonR = pearsonR + (rInst - pearsonR) * k;
 
 		// Channel strengths (0..1).
-		const corrRaw = zA * zB > 0 ? Math.min(strengthFromZ(zA), strengthFromZ(zB)) : 0;
-		const antiRaw = zA * zB < 0 ? Math.min(strengthFromZ(zA), strengthFromZ(zB)) : 0;
-		// "Stick together" should be a rarer, more special state.
-		// Push its activation threshold up so it doesn't dominate baseline.
-		const stickRaw = 0.85 * strengthFromZ(zAgree, 1.1, 3.1);
-		const pearsonRaw = clamp01((Math.abs(pearsonR) - 0.08) / 0.55);
+		const corrRaw =
+			zAInst * zBInst > 0 ? Math.min(strengthFromZ(zAInst), strengthFromZ(zBInst)) : 0;
+		const antiRaw =
+			zAInst * zBInst < 0 ? Math.min(strengthFromZ(zAInst), strengthFromZ(zBInst)) : 0;
+		const stickRaw = 0.85 * strengthFromZ(zAgreeInst, 1.1, 3.1);
+		const pearsonRaw = clamp01((Math.abs(rInst) - 0.08) / 0.55);
 
 		const raw = {
 			correlated: corrRaw,
 			anti: antiRaw,
 			stick: stickRaw,
-			pearson: pearsonRaw
+			pearson: Math.max(0.06, pearsonRaw)
 		};
 		rawLast = raw;
 
+		// Dominance updates on signal ticks, not every frame.
+		updateDominant(raw, 1000 / Math.max(0.25, updatesPerSec));
+
+		// Stage + significance integrate slowly.
+		const base = Math.max(raw.correlated, raw.anti, raw.stick, raw.pearson);
+		coherence = base;
+
+		const riseMs = 2600;
+		const fallMs = 4200;
+		const dtMs = 1000 / Math.max(0.25, updatesPerSec);
+		const tau = coherence > stageEnergy ? riseMs : fallMs;
+		const ek = 1 - Math.exp(-dtMs / tau);
+		stageEnergy = stageEnergy + (coherence - stageEnergy) * ek;
+		stage = computeStageFromEnergy(stageEnergy, stage);
+
+		const corrZ = corrRaw > 0 ? Math.min(Math.abs(zAInst), Math.abs(zBInst)) : 0;
+		const antiZ = antiRaw > 0 ? Math.min(Math.abs(zAInst), Math.abs(zBInst)) : 0;
+		const stickZ = stickRaw > 0 ? Math.abs(zAgreeInst) : 0;
+
+		const rClamped = Math.max(-0.999999, Math.min(0.999999, rInst));
+		const fisher =
+			0.5 * Math.log((1 + rClamped) / (1 - rClamped)) * Math.sqrt(Math.max(1, sampleBits - 3));
+		const pearsonZ = pearsonRaw > 0 ? Math.abs(fisher) : 0;
+
+		const pCorr = corrZ > 0 ? twoSidedPFromZ(corrZ) : 1;
+		const pAnti = antiZ > 0 ? twoSidedPFromZ(antiZ) : 1;
+		const pStick = stickZ > 0 ? twoSidedPFromZ(stickZ) : 1;
+		const pPearson = pearsonZ > 0 ? twoSidedPFromZ(pearsonZ) : 1;
+
+		// Aesthetic floor: keep some life even under pure randomness.
+		const pOverall = Math.min(0.35, Math.min(pCorr, pAnti, pStick, pPearson));
+		const surprisal = Math.min(6, -Math.log10(pOverall));
+		const targetSig = clamp01((surprisal - 0.8) / 4.8);
+
+		const sigRiseMs = 1400;
+		const sigFallMs = 2600;
+		const sigTau = targetSig > sigEnergy ? sigRiseMs : sigFallMs;
+		const sk = 1 - Math.exp(-dtMs / sigTau);
+		sigEnergy = sigEnergy + (targetSig - sigEnergy) * sk;
+	}
+
+	function step(dtMs: number) {
+		bootMs += dtMs;
+
+		const bootT = clamp01(bootMs / 5000);
+		const bootLock = bootT < 1;
+
+		// 1) Signal engine runs on a slower clock.
+		tickBudget += updatesPerSec * (dtMs / 1000);
+		let ticks = Math.floor(tickBudget);
+		ticks = Math.min(ticks, 8); // cap catch-up so we never spiral
+
+		if (!bootLock && ticks > 0) {
+			tickBudget -= ticks;
+			for (let t = 0; t < ticks; t++) {
+				signalTick();
+			}
+		} else {
+			// During boot we keep visuals alive but lock the "meaning" logic.
+			tickBudget = Math.min(2, tickBudget);
+			dominant = 'baseline';
+			dominance = 0;
+			coherence = 0;
+			stageEnergy = 0;
+			sigEnergy = 0;
+			stage = 1;
+			rawLast = { correlated: 0, anti: 0, stick: 0, pearson: 0 };
+			rawRender = { correlated: 0, anti: 0, stick: 0, pearson: 0 };
+		}
+
+		// 2) Motion and smoothing runs every frame.
 		// Pearson motion: always drifting a little, speeds up with |pearson|.
-		// Direction flips with the sign (with hysteresis so it feels intentional).
 		{
 			const dt = dtMs / 1000;
 			const spinTau = 900;
 			const sk = 1 - Math.exp(-dtMs / spinTau);
 			pearsonSpin = pearsonSpin + (pearsonR - pearsonSpin) * sk;
-
-			// During boot we keep motion alive but avoid dramatic flips.
-			const bootT = clamp01(bootMs / 5000);
-			const bootLock = bootT < 1;
 
 			if (!bootLock) {
 				const flipThreshold = 0.055;
@@ -379,7 +441,6 @@
 				pearsonDir = 1;
 			}
 
-			// fade flip accent
 			pearsonFlip *= Math.exp(-dtMs / 650);
 
 			const mag = Math.min(1, Math.abs(pearsonSpin));
@@ -389,69 +450,45 @@
 			pearsonPhase = wrapHue(pearsonPhase + pearsonDir * speed * 360 * dt);
 		}
 
-		// Boot lockout: for the first 5s, keep dominance/stage pinned so startup is clear.
-		const bootT = clamp01(bootMs / 5000);
-		const bootLock = bootT < 1;
-
-		if (!bootLock) {
-			updateDominant(raw, dtMs);
-		} else {
-			dominant = 'baseline';
-			dominance = 0;
+		// Smooth the channel strengths for rendering so it never feels like it "steps".
+		{
+			const tau = 3200;
+			const k = 1 - Math.exp(-dtMs / tau);
+			rawRender = {
+				correlated: rawRender.correlated + (rawLast.correlated - rawRender.correlated) * k,
+				anti: rawRender.anti + (rawLast.anti - rawRender.anti) * k,
+				stick: rawRender.stick + (rawLast.stick - rawRender.stick) * k,
+				pearson: rawRender.pearson + (rawLast.pearson - rawRender.pearson) * k
+			};
 		}
 
-		// Smoothly blend hue targets so channel changes aren't jarring.
-		const baseHue = dominant === 'baseline' ? 205 : palette[dominant].hue;
-		const hueTau = 1600;
+		// Baseline hue wandering: even when dim, it slowly drifts (tens of seconds).
+		if (dominant === 'baseline') {
+			const nowMs = performance.now();
+			if (baselineHueNextAtMs === 0) {
+				baselineHueTarget = 205;
+				baselineHueNextAtMs = nowMs + 15000;
+			}
+			if (nowMs >= baselineHueNextAtMs) {
+				const picks = [186, 24, 112, 252, 205];
+				baselineHueTarget = picks[Math.floor(Math.random() * picks.length)];
+				baselineHueNextAtMs = nowMs + 12000 + Math.random() * 22000;
+			}
+		}
+
+		// Hue follows the dominant channel slowly (10s-of-seconds feel).
+		const baseHue = dominant === 'baseline' ? baselineHueTarget : palette[dominant].hue;
+		const hueTau = dominant === 'baseline' ? 14000 : 9000;
 		const hk = 1 - Math.exp(-dtMs / hueTau);
 		hueSmooth = hueApproach(hueSmooth, baseHue, hk);
 
-		// Coherence is an overall envelope used for stage logic.
-		const base = Math.max(raw.correlated, raw.anti, raw.stick, raw.pearson);
-		coherence = base;
+		// Saturation should still respond, but smoothly.
+		const satTarget = dominant === 'baseline' ? 52 : dominant === 'pearson' ? 72 : 80;
+		const satTau = 9000;
+		const sk = 1 - Math.exp(-dtMs / satTau);
+		satSmooth = satSmooth + (satTarget - satSmooth) * sk;
 
-		if (bootLock) {
-			coherence = 0;
-			stageEnergy = 0;
-			sigEnergy = 0;
-			stage = 1;
-		} else {
-			const riseMs = 2600;
-			const fallMs = 4200;
-			const tau = coherence > stageEnergy ? riseMs : fallMs;
-			const k = 1 - Math.exp(-dtMs / tau);
-			stageEnergy = stageEnergy + (coherence - stageEnergy) * k;
-			stage = computeStageFromEnergy(stageEnergy, stage);
-
-			// Approximate statistical unlikeliness of the strongest channel (artist-friendly).
-			// This is not their patented random-walk segmentation; it's a smooth, intuitive proxy.
-			const corrZ = corrRaw > 0 ? Math.min(Math.abs(zA), Math.abs(zB)) : 0;
-			const antiZ = antiRaw > 0 ? Math.min(Math.abs(zA), Math.abs(zB)) : 0;
-			const stickZ = stickRaw > 0 ? Math.abs(zAgree) : 0;
-
-			// Fisher z-transform gives an approximately-normal score for correlation.
-			const rClamped = Math.max(-0.999999, Math.min(0.999999, pearsonR));
-			const fisher =
-				0.5 * Math.log((1 + rClamped) / (1 - rClamped)) * Math.sqrt(Math.max(1, windowBits - 3));
-			const pearsonZ = pearsonRaw > 0 ? Math.abs(fisher) : 0;
-
-			const pCorr = corrZ > 0 ? twoSidedPFromZ(corrZ) : 1;
-			const pAnti = antiZ > 0 ? twoSidedPFromZ(antiZ) : 1;
-			const pStick = stickZ > 0 ? twoSidedPFromZ(stickZ) : 1;
-			const pPearson = pearsonZ > 0 ? twoSidedPFromZ(pearsonZ) : 1;
-
-			const pOverall = Math.min(pCorr, pAnti, pStick, pPearson);
-			const surprisal = Math.min(6, -Math.log10(pOverall));
-			const targetSig = clamp01((surprisal - 0.8) / 4.8);
-
-			const sigRiseMs = 1400;
-			const sigFallMs = 2600;
-			const sigTau = targetSig > sigEnergy ? sigRiseMs : sigFallMs;
-			const sk = 1 - Math.exp(-dtMs / sigTau);
-			sigEnergy = sigEnergy + (targetSig - sigEnergy) * sk;
-		}
-
-		render(raw);
+		render(rawRender);
 	}
 
 	function render(raw: Record<Exclude<Channel, 'baseline'>, number>) {
@@ -487,7 +524,7 @@
 
 		// Pick a single hue family (smoothed across switches).
 		let hue = hueSmooth;
-		let sat = dominant === 'baseline' ? 55 : dominant === 'pearson' ? 70 : 78;
+		let sat = satSmooth;
 
 		// Bias polarity gently shifts hue within the family.
 		const polarity = Math.max(-1, Math.min(1, (zA + zB) / 6));
@@ -499,8 +536,10 @@
 		const whitenStage3 = stage === 3 ? 0.62 + sheen * 0.12 : 0;
 		const whiten = stage === 1 ? 0 : stage === 2 ? whitenStage2 : whitenStage3;
 
-		const brightness = 0.18 + 0.95 * Math.pow(e, 0.86);
-		const orbAlpha = 0.55 + 0.35 * brightness;
+		// Brightness: stageEnergy is still the envelope, but ensure a visible baseline.
+		const eVis = Math.max(e, 0.08);
+		const brightness = 0.16 + 0.95 * Math.pow(eVis, 0.86);
+		const orbAlpha = 0.6 + 0.3 * brightness;
 
 		// Orb: soft fill with moving internal gradients (lamp-like convection).
 		ctx.save();
@@ -857,7 +896,7 @@
 	$effect(() => {
 		// If the user drags sliders away from preset values, mark as custom.
 		const isMatch = (p: Exclude<Preset, 'custom'>) =>
-			windowBits === presets[p].windowBits && bitsPerSec === presets[p].bitsPerSec;
+			sampleBits === presets[p].sampleBits && updatesPerSec === presets[p].updatesPerSec;
 		preset = isMatch('fast')
 			? 'fast'
 			: isMatch('medium')
@@ -909,7 +948,7 @@
 			</div>
 			<div class="hud-row">
 				<span class="k">Window</span>
-				<span class="v">{windowBits.toLocaleString()} bits</span>
+				<span class="v">{sampleBits.toLocaleString()} bits</span>
 			</div>
 			<div class="hud-row">
 				<span class="k">FPS</span>
@@ -975,14 +1014,14 @@
 						</button>
 					</div>
 					<label>
-						<span>Window bits</span>
-						<input bind:value={windowBits} type="range" min="800" max="24000" step="400" />
-						<span class="mono">{windowBits}</span>
+						<span>Sample</span>
+						<input value={sampleBits} type="range" min="200" max="200" step="1" disabled />
+						<span class="mono">{sampleBits} bits</span>
 					</label>
 					<label>
-						<span>Bits/sec</span>
-						<input bind:value={bitsPerSec} type="range" min="20" max="6000" step="10" />
-						<span class="mono">{bitsPerSec}</span>
+						<span>Updates/sec</span>
+						<input bind:value={updatesPerSec} type="range" min="1" max="5" step="1" />
+						<span class="mono">{updatesPerSec}</span>
 					</label>
 					<label>
 						<span>Smoothing</span>
