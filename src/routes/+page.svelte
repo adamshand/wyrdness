@@ -8,16 +8,28 @@
 
 	let showHud = $state(true);
 	let showSettings = $state(false);
+	let showLegend = $state(false);
 
 	// "Device-ish" defaults: they mention 200-bit samples, and a few 1000 bits/sec.
 	let windowBits = $state(6000);
 	let bitsPerSec = $state(1600);
+
+	type Preset = 'fast' | 'medium' | 'slow' | 'custom';
+	const presets: Record<Exclude<Preset, 'custom'>, { windowBits: number; bitsPerSec: number; label: string; note: string }> = {
+		fast: { windowBits: 4000, bitsPerSec: 2400, label: 'Fast', note: 'Livelier' },
+		medium: { windowBits: 6000, bitsPerSec: 1200, label: 'Medium', note: 'Balanced' },
+		slow: { windowBits: 12000, bitsPerSec: 350, label: 'Slow', note: 'Ceremonial' }
+	};
+	let preset = $state<Preset>('medium');
+	let bitBudget = 0; // fractional bits accumulated between frames
 	let alpha = $state(0.08);
 	let renderScale = $state(0.75);
 
 	let stage = $state<Stage>(1);
 	let stageEnergy = $state(0);
 	let coherence = $state(0);
+
+	let hueSmooth = $state(205);
 
 	let zA = $state(0);
 	let zB = $state(0);
@@ -38,6 +50,13 @@
 	let onesA = 0;
 	let onesB = 0;
 	let agree = 0; // count of A==B in the window
+
+	let rawLast: Record<Exclude<Channel, 'baseline'>, number> = {
+		correlated: 0,
+		anti: 0,
+		stick: 0,
+		pearson: 0
+	};
 
 	// For Pearson on ±1 variables.
 	let sumX = 0;
@@ -61,6 +80,27 @@
 	function smoothstep(a: number, b: number, t: number) {
 		const x = clamp01((t - a) / (b - a));
 		return x * x * (3 - 2 * x);
+	}
+
+	function wrapHue(h: number) {
+		const x = h % 360;
+		return x < 0 ? x + 360 : x;
+	}
+
+	function hueApproach(current: number, target: number, k: number) {
+		// Move along the shortest arc on the hue circle.
+		const c = wrapHue(current);
+		const t = wrapHue(target);
+		let d = t - c;
+		if (d > 180) d -= 360;
+		if (d < -180) d += 360;
+		return wrapHue(c + d * k);
+	}
+
+	function applyPreset(p: Exclude<Preset, 'custom'>) {
+		preset = p;
+		windowBits = presets[p].windowBits;
+		bitsPerSec = presets[p].bitsPerSec;
 	}
 
 	function reseed() {
@@ -102,9 +142,12 @@
 		coherence = 0;
 		stageEnergy = 0;
 		stage = 1;
+		bitBudget = 0;
 
 		dominant = 'baseline';
 		dominance = 0;
+		showLegend = false;
+		hueSmooth = 205;
 
 		bootMs = 0;
 	}
@@ -193,9 +236,19 @@
 	function step(dtMs: number) {
 		bootMs += dtMs;
 
-		// Pull bits in chunks roughly like the device (200-bit samples).
-		const target = Math.max(64, Math.floor(bitsPerSec * (dtMs / 1000)));
-		const chunk = Math.max(200, Math.floor(target / 4) * 4);
+		// Pull bits in chunks roughly like the device (200-bit samples),
+		// but allow low bps without forcing 200 bits every frame.
+		bitBudget += bitsPerSec * (dtMs / 1000);
+		let chunk = Math.floor(bitBudget);
+		chunk = Math.min(chunk, 4000); // cap per frame
+		chunk = Math.floor(chunk / 4) * 4; // align for byte extraction
+
+		if (chunk < 4) {
+			render(rawLast);
+			return;
+		}
+
+		bitBudget -= chunk;
 
 		const aBits = randBits(chunk);
 		const bBits = randBits(chunk);
@@ -248,7 +301,9 @@
 		// Channel strengths (0..1).
 		const corrRaw = zA * zB > 0 ? Math.min(strengthFromZ(zA), strengthFromZ(zB)) : 0;
 		const antiRaw = zA * zB < 0 ? Math.min(strengthFromZ(zA), strengthFromZ(zB)) : 0;
-		const stickRaw = strengthFromZ(zAgree, 0.35, 3.0);
+		// "Stick together" should be a rarer, more special state.
+		// Push its activation threshold up so it doesn't dominate baseline.
+		const stickRaw = 0.85 * strengthFromZ(zAgree, 1.1, 3.1);
 		const pearsonRaw = clamp01((Math.abs(pearsonR) - 0.08) / 0.55);
 
 		const raw = {
@@ -257,6 +312,13 @@
 			stick: stickRaw,
 			pearson: pearsonRaw
 		};
+		rawLast = raw;
+
+		// Smoothly blend hue targets so channel changes aren't jarring.
+		const baseHue = dominant === 'baseline' ? 205 : palette[dominant].hue;
+		const hueTau = 1600;
+		const hk = 1 - Math.exp(-dtMs / hueTau);
+		hueSmooth = hueApproach(hueSmooth, baseHue, hk);
 
 		updateDominant(raw, dtMs);
 
@@ -302,15 +364,9 @@
 		const cy = h * 0.54;
 		const r = Math.min(w, h) * 0.42;
 
-		// Pick a single hue family.
-		let hue = 205;
-		let sat = 78;
-		if (dominant !== 'baseline') {
-			hue = palette[dominant].hue;
-			sat = dominant === 'pearson' ? 70 : 78;
-		} else {
-			sat = 55;
-		}
+		// Pick a single hue family (smoothed across switches).
+		let hue = hueSmooth;
+		let sat = dominant === 'baseline' ? 55 : dominant === 'pearson' ? 70 : 78;
 
 		// Bias polarity gently shifts hue within the family.
 		const polarity = Math.max(-1, Math.min(1, (zA + zB) / 6));
@@ -481,6 +537,11 @@
 			showHud = true;
 			return;
 		}
+		if (e.key === 'l' || e.key === 'L') {
+			showLegend = !showLegend;
+			showHud = true;
+			return;
+		}
 		if (e.key === 'r' || e.key === 'R') {
 			reseed();
 			return;
@@ -538,6 +599,12 @@
 	});
 
 	$effect(() => {
+		// If the user drags sliders away from preset values, mark as custom.
+		const isMatch = (p: Exclude<Preset, 'custom'>) => windowBits === presets[p].windowBits && bitsPerSec === presets[p].bitsPerSec;
+		preset = isMatch('fast') ? 'fast' : isMatch('medium') ? 'medium' : isMatch('slow') ? 'slow' : 'custom';
+	});
+
+	$effect(() => {
 		if (typeof window === 'undefined') return;
 		if (bufCanvas) resize();
 	});
@@ -582,9 +649,50 @@
 				<span class="v">{fps.toFixed(0)}</span>
 			</div>
 
+			<div class="hud-actions">
+				<button class="hud-btn" type="button" onclick={() => (showLegend = !showLegend)} title="Toggle legend (L)">
+					Legend
+				</button>
+			</div>
+
+			{#if showLegend}
+				<div class="legend">
+					<div class="legend-row"><span class="swatch" style={`--h:${palette.correlated.hue}`}></span> Teal: Correlated drift</div>
+					<div class="legend-row"><span class="swatch" style={`--h:${palette.anti.hue}`}></span> Ember: Anti-correlated drift</div>
+					<div class="legend-row"><span class="swatch" style={`--h:${palette.stick.hue}`}></span> Green: “Stick together” (rarer)</div>
+					<div class="legend-row"><span class="swatch" style={`--h:${palette.pearson.hue}`}></span> Indigo: Pearson correlation (drives Stage 3 sheen)</div>
+				</div>
+			{/if}
+
 			{#if showSettings}
 				<div class="sep"></div>
 				<div class="controls">
+					<div class="presets" role="group" aria-label="Presets">
+						<button
+							type="button"
+							class:active={preset === 'fast'}
+							onclick={() => applyPreset('fast')}
+							title={`${presets.fast.label}: ${presets.fast.note}`}
+						>
+							Fast
+						</button>
+						<button
+							type="button"
+							class:active={preset === 'medium'}
+							onclick={() => applyPreset('medium')}
+							title={`${presets.medium.label}: ${presets.medium.note}`}
+						>
+							Medium
+						</button>
+						<button
+							type="button"
+							class:active={preset === 'slow'}
+							onclick={() => applyPreset('slow')}
+							title={`${presets.slow.label}: ${presets.slow.note}`}
+						>
+							Slow
+						</button>
+					</div>
 					<label>
 						<span>Window bits</span>
 						<input bind:value={windowBits} type="range" min="800" max="24000" step="400" />
@@ -592,7 +700,7 @@
 					</label>
 					<label>
 						<span>Bits/sec</span>
-						<input bind:value={bitsPerSec} type="range" min="200" max="6000" step="100" />
+							<input bind:value={bitsPerSec} type="range" min="20" max="6000" step="10" />
 						<span class="mono">{bitsPerSec}</span>
 					</label>
 					<label>
@@ -605,10 +713,10 @@
 						<input bind:value={renderScale} type="range" min="0.45" max="1" step="0.05" />
 						<span class="mono">{renderScale.toFixed(2)}</span>
 					</label>
-					<div class="hint mono">Hotkeys: H HUD, S settings, R reset, F fullscreen</div>
+					<div class="hint mono">Hotkeys: H HUD, S settings, L legend, R reset, F fullscreen</div>
 				</div>
 			{:else}
-				<div class="hint mono">Hotkeys: H HUD, S settings, R reset, F fullscreen</div>
+				<div class="hint mono">Hotkeys: H HUD, S settings, L legend, R reset, F fullscreen</div>
 			{/if}
 		</section>
 	{/if}
@@ -651,6 +759,53 @@
 		margin-bottom: 8px;
 	}
 
+	.hud-actions {
+		display: flex;
+		justify-content: flex-end;
+		margin: 6px 0 8px;
+	}
+
+	.hud-btn {
+		appearance: none;
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		background: rgba(255, 255, 255, 0.06);
+		color: rgba(255, 255, 255, 0.9);
+		border-radius: 10px;
+		padding: 6px 10px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.hud-btn:hover {
+		background: rgba(255, 255, 255, 0.1);
+	}
+
+	.legend {
+		margin: 8px 0 4px;
+		padding: 8px 10px;
+		border-radius: 12px;
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: rgba(0, 0, 0, 0.18);
+		font-size: 12px;
+		color: rgba(255, 255, 255, 0.86);
+	}
+
+	.legend-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 3px 0;
+	}
+
+	.swatch {
+		width: 12px;
+		height: 12px;
+		border-radius: 999px;
+		background: radial-gradient(circle at 30% 30%, hsla(var(--h) 90% 70% / 0.95), hsla(var(--h) 90% 45% / 0.95));
+		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+		flex: 0 0 auto;
+	}
+
 	.hud-name {
 		font-weight: 650;
 		letter-spacing: 0.02em;
@@ -688,6 +843,33 @@
 	.controls {
 		display: grid;
 		gap: 8px;
+	}
+
+	.presets {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 8px;
+		margin-bottom: 2px;
+	}
+
+	.presets button {
+		appearance: none;
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		background: rgba(255, 255, 255, 0.05);
+		color: rgba(255, 255, 255, 0.9);
+		border-radius: 12px;
+		padding: 8px 10px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.presets button:hover {
+		background: rgba(255, 255, 255, 0.09);
+	}
+
+	.presets button.active {
+		border-color: rgba(255, 255, 255, 0.32);
+		background: rgba(255, 255, 255, 0.12);
 	}
 
 	label {
