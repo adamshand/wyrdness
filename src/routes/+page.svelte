@@ -1,33 +1,28 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	type Channel =
-		| 'baseline'
-		| 'correlated_high'
-		| 'correlated_low'
-		| 'anti_ab'
-		| 'anti_ba'
-		| 'stick'
-		| 'pearson';
+	import BottomBar from '$lib/components/BottomBar.svelte';
+	import DemoOverlay from '$lib/components/DemoOverlay.svelte';
+	import DevPanel from '$lib/components/DevPanel.svelte';
+	import HelpModal from '$lib/components/HelpModal.svelte';
+	import LegendPanel from '$lib/components/LegendPanel.svelte';
 
-	type LightMode = 'wow' | 'mellow';
-
-	// === Mode Presets ===
-	// Wyrd Light has "Wow (for showing off)" and "Mellow (for meetings and retreats)"
-	// plus 5 response speed settings. We combine these into mode presets.
-	type ModePreset = {
-		// Smoothing time constants (ms)
-		sigEnergyRiseMs: number;
-		sigEnergyFallMs: number;
-		hueTauMs: number;
-		satTauMs: number;
-		// Visual intensity
-		maxBrightness: number; // 0..1 multiplier on brightness
-		saturationBoost: number; // added to base saturation
-		// Dominance behavior
-		switchMargin: number; // how much stronger new channel must be to take over
-		keepBonus: number; // bonus to current channel to prevent rapid switching
-	};
+	import { DEMO_CHANNELS, type DemoChannel } from '$lib/demo';
+	import { palette } from '$lib/palette';
+	import {
+		clamp01,
+		hueApproach,
+		smoothstep,
+		strengthFromZ,
+		twoSidedPFromZ,
+		wrapHue
+	} from '$lib/signal/math';
+	import {
+		findOptimalStartingPoint,
+		findOptimalStartingPointAgreement,
+		findOptimalStartingPointPearson
+	} from '$lib/signal/starting-point';
+	import type { Channel, EpisodeState, LightMode, ModePreset } from '$lib/signal/types';
 
 	const MODE_PRESETS: Record<LightMode, ModePreset> = {
 		wow: {
@@ -139,27 +134,11 @@
 
 	// === Demo Mode ===
 	// Auto-cycling showcase of all channels with Pearson spin
-	const DEMO_CHANNELS: Exclude<Channel, 'baseline'>[] = [
-		'correlated_high',
-		'correlated_low',
-		'anti_ab',
-		'anti_ba',
-		'stick',
-		'pearson'
-	];
-	const DEMO_LABELS: Record<Exclude<Channel, 'baseline'>, string> = {
-		correlated_high: 'Correlated ↑',
-		correlated_low: 'Correlated ↓',
-		anti_ab: 'Diverging A>B',
-		anti_ba: 'Diverging B>A',
-		stick: 'Agreement',
-		pearson: 'Pearson'
-	};
 	const DEMO_DURATION_MS = 5000; // 5 seconds per channel
 
 	let demoMode = $state(false); // whether auto-cycling is active
 	let demoBoost = $state(0); // injected fake coherence (0..1)
-	let demoChannel = $state<Exclude<Channel, 'baseline'>>('correlated_high');
+	let demoChannel = $state<DemoChannel>('correlated_high');
 	let demoIndex = $state(0); // which channel in the sequence (0-4)
 	let demoPearsonDir = $state<1 | -1>(1); // alternates each channel
 	let demoStartTime = $state(0); // timestamp when current channel started
@@ -189,13 +168,6 @@
 	let cumSumXY = $state<number[]>([]); // cumulative sum of X*Y for Pearson
 	let tickCount = $state(0); // total ticks since reseed
 
-	// Episode state: tracks the "best" current segment for each channel
-	type EpisodeState = {
-		startTick: number; // when this episode started
-		peakZ: number; // best z-score seen in this episode
-		currentZ: number; // current z-score from startTick to now
-		strength: number; // derived strength (0..1)
-	};
 	const defaultEpisode = (): EpisodeState => ({ startTick: 0, peakZ: 0, currentZ: 0, strength: 0 });
 	let episodes = $state<Record<Exclude<Channel, 'baseline'>, EpisodeState>>({
 		correlated_high: defaultEpisode(),
@@ -229,207 +201,6 @@
 	let bufCanvas: HTMLCanvasElement;
 	let bufCtx: CanvasRenderingContext2D;
 	let renderScale = 0.75;
-
-	// Channel colors: light/dark pairs for directional channels
-	const palette: Record<Exclude<Channel, 'baseline'>, { hue: number; name: string }> = {
-		correlated_high: { hue: 170, name: 'Corr +' }, // Teal/cyan (both toward 1s)
-		correlated_low: { hue: 238, name: 'Corr -' }, // Deep indigo/blue (both toward 0s)
-		anti_ab: { hue: 50, name: 'Anti A>B' }, // Golden orange (A high, B low)
-		anti_ba: { hue: 350, name: 'Anti B>A' }, // Crimson rose (B high, A low)
-		stick: { hue: 112, name: 'Stick' }, // Green (agreement)
-		pearson: { hue: 252, name: 'Pearson' } // Violet (rendered pearly when dominant)
-	};
-
-	// User-friendly display names for the bottom bar
-	const DISPLAY_NAMES: Record<Channel, string> = {
-		baseline: 'Baseline',
-		correlated_high: 'Correlated',
-		correlated_low: 'Correlated',
-		anti_ab: 'Diverging A>B',
-		anti_ba: 'Diverging B>A',
-		stick: 'Agreement',
-		pearson: 'Pearson'
-	};
-
-	// Get arrow indicator for high/low channels
-	function getDirectionArrow(channel: Channel): string {
-		if (channel === 'correlated_high') return ' ↑';
-		if (channel === 'correlated_low') return ' ↓';
-		return '';
-	}
-
-	// Get Pearson +/- indicator (only when significant)
-	const PEARSON_DISPLAY_THRESHOLD = 0.05;
-	function getPearsonIndicator(r: number): string {
-		if (Math.abs(r) < PEARSON_DISPLAY_THRESHOLD) return '';
-		return r > 0 ? ' +' : ' −';
-	}
-
-	// === Utility Functions ===
-	function clamp01(v: number) {
-		return Math.min(1, Math.max(0, v));
-	}
-
-	function smoothstep(a: number, b: number, t: number) {
-		const x = clamp01((t - a) / (b - a));
-		return x * x * (3 - 2 * x);
-	}
-
-	function wrapHue(h: number) {
-		const x = h % 360;
-		return x < 0 ? x + 360 : x;
-	}
-
-	function hueApproach(current: number, target: number, k: number) {
-		const c = wrapHue(current);
-		const t = wrapHue(target);
-		let d = t - c;
-		if (d > 180) d -= 360;
-		if (d < -180) d += 360;
-		return wrapHue(c + d * k);
-	}
-
-	function erfApprox(x: number) {
-		const sign = x < 0 ? -1 : 1;
-		const ax = Math.abs(x);
-		const t = 1 / (1 + 0.3275911 * ax);
-		const a1 = 0.254829592;
-		const a2 = -0.284496736;
-		const a3 = 1.421413741;
-		const a4 = -1.453152027;
-		const a5 = 1.061405429;
-		const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
-		return sign * y;
-	}
-
-	function normalCdf(x: number) {
-		return 0.5 * (1 + erfApprox(x / Math.SQRT2));
-	}
-
-	function twoSidedPFromZ(z: number) {
-		const az = Math.abs(z);
-		const tail = 1 - normalCdf(az);
-		return Math.max(1e-18, Math.min(1, 2 * tail));
-	}
-
-	// === Starting Point Detection ===
-	// Find the optimal starting point that maximizes |S(t) - S(s)| / sqrt((t-s) * bitsPerTick)
-	// Returns { startIdx, z } where startIdx is the tick index and z is the z-score
-	function findOptimalStartingPoint(
-		cumSum: number[],
-		currentIdx: number,
-		bitsPerTick: number,
-		lookback: number = MAX_LOOKBACK,
-		minLen: number = MIN_SEGMENT_LEN
-	): { startIdx: number; z: number } {
-		let bestZ = 0;
-		let bestStart = currentIdx;
-
-		const endSum = cumSum[currentIdx] ?? 0;
-		const searchStart = Math.max(0, currentIdx - lookback);
-
-		for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-			const startSum = cumSum[s] ?? 0;
-			const delta = endSum - startSum;
-			const tickSpan = currentIdx - s;
-			const bitSpan = tickSpan * bitsPerTick;
-
-			// z = deviation / sqrt(variance) = delta / sqrt(bitSpan)
-			// For ±1 bits, variance per bit is 1, so variance over N bits is N
-			const z = delta / Math.sqrt(bitSpan);
-
-			if (Math.abs(z) > Math.abs(bestZ)) {
-				bestZ = z;
-				bestStart = s;
-			}
-		}
-
-		return { startIdx: bestStart, z: bestZ };
-	}
-
-	// Find optimal starting point for agreement channel
-	// Agreement is: count positions where A[i] == B[i]
-	// Under null: P(agree) = 0.5, so expected agreement count = N/2
-	// We track cumulative deviation from expectation: (agree - 0.5) per bit
-	function findOptimalStartingPointAgreement(
-		cumSum: number[],
-		currentIdx: number,
-		bitsPerTick: number,
-		lookback: number = MAX_LOOKBACK,
-		minLen: number = MIN_SEGMENT_LEN
-	): { startIdx: number; z: number } {
-		let bestZ = 0;
-		let bestStart = currentIdx;
-
-		const endSum = cumSum[currentIdx] ?? 0;
-		const searchStart = Math.max(0, currentIdx - lookback);
-
-		for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-			const startSum = cumSum[s] ?? 0;
-			const delta = endSum - startSum; // excess agreement count above expectation
-			const tickSpan = currentIdx - s;
-			const bitSpan = tickSpan * bitsPerTick;
-
-			// Variance of agreement count over N bits is N/4 (binomial with p=0.5)
-			const z = delta / Math.sqrt(bitSpan / 4);
-
-			if (Math.abs(z) > Math.abs(bestZ)) {
-				bestZ = z;
-				bestStart = s;
-			}
-		}
-
-		return { startIdx: bestStart, z: bestZ };
-	}
-
-	// Find optimal starting point for Pearson correlation
-	// We track cumulative X*Y where X, Y are ±1
-	// Under null: E[XY] = 0, Var[XY] = 1
-	function findOptimalStartingPointPearson(
-		cumSumXY: number[],
-		cumSumA: number[],
-		cumSumB: number[],
-		currentIdx: number,
-		bitsPerTick: number,
-		lookback: number = MAX_LOOKBACK,
-		minLen: number = MIN_SEGMENT_LEN
-	): { startIdx: number; z: number; r: number } {
-		let bestZ = 0;
-		let bestR = 0;
-		let bestStart = currentIdx;
-
-		const searchStart = Math.max(0, currentIdx - lookback);
-
-		for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-			const tickSpan = currentIdx - s;
-			const bitSpan = tickSpan * bitsPerTick;
-
-			const sumXY = (cumSumXY[currentIdx] ?? 0) - (cumSumXY[s] ?? 0);
-			const sumX = (cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0);
-			const sumY = (cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0);
-
-			// Pearson correlation for ±1 variables
-			const meanX = sumX / bitSpan;
-			const meanY = sumY / bitSpan;
-			const cov = sumXY / bitSpan - meanX * meanY;
-			const varX = Math.max(1e-6, 1 - meanX * meanX);
-			const varY = Math.max(1e-6, 1 - meanY * meanY);
-			const r = cov / Math.sqrt(varX * varY);
-
-			// Fisher z-transformation for significance
-			const rClamped = Math.max(-0.999, Math.min(0.999, r));
-			const fisherZ = 0.5 * Math.log((1 + rClamped) / (1 - rClamped));
-			const z = fisherZ * Math.sqrt(Math.max(1, bitSpan - 3));
-
-			if (Math.abs(z) > Math.abs(bestZ)) {
-				bestZ = z;
-				bestR = r;
-				bestStart = s;
-			}
-		}
-
-		return { startIdx: bestStart, z: bestZ, r: bestR };
-	}
 
 	// === RNG ===
 	function randBits(count: number) {
@@ -517,14 +288,8 @@
 		}
 	}
 
-	function zFromOnes(ones: number, N: number) {
-		const E = N / 2;
-		const sd = Math.sqrt(N / 4);
-		return (ones - E) / sd;
-	}
-
-	function strengthFromZ(z: number, zStart = STRENGTH_Z_START, zFull = STRENGTH_Z_FULL) {
-		return clamp01((Math.abs(z) - zStart) / (zFull - zStart));
+	function strengthFromZLocal(z: number, zStart = STRENGTH_Z_START, zFull = STRENGTH_Z_FULL) {
+		return strengthFromZ(z, zStart, zFull);
 	}
 
 	function updateDominant(raw: Record<Exclude<Channel, 'baseline'>, number>, dtMs: number) {
@@ -598,14 +363,28 @@
 		// === Find optimal starting points for each channel ===
 
 		// Stream A and B individually (for correlated/anti detection)
-		const spA = findOptimalStartingPoint(cumSumA, currentIdx, N);
-		const spB = findOptimalStartingPoint(cumSumB, currentIdx, N);
+		const spA = findOptimalStartingPoint(cumSumA, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
+		const spB = findOptimalStartingPoint(cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
 
 		// Agreement channel
-		const spAgree = findOptimalStartingPointAgreement(cumSumAgree, currentIdx, N);
+		const spAgree = findOptimalStartingPointAgreement(
+			cumSumAgree,
+			currentIdx,
+			N,
+			MAX_LOOKBACK,
+			MIN_SEGMENT_LEN
+		);
 
 		// Pearson channel
-		const spPearson = findOptimalStartingPointPearson(cumSumXY, cumSumA, cumSumB, currentIdx, N);
+		const spPearson = findOptimalStartingPointPearson(
+			cumSumXY,
+			cumSumA,
+			cumSumB,
+			currentIdx,
+			N,
+			MAX_LOOKBACK,
+			MIN_SEGMENT_LEN
+		);
 
 		// === Compute channel strengths from segments ===
 		// Now with directional channels: correlated_high, correlated_low, anti_ab, anti_ba
@@ -669,11 +448,11 @@
 		const pearsonR_seg = spPearson.r;
 
 		// === Convert z-scores to strengths (0..1) ===
-		const corrHighRaw = strengthFromZ(corrHighZ);
-		const corrLowRaw = strengthFromZ(corrLowZ);
-		const antiAbRaw = strengthFromZ(antiAbZ);
-		const antiBaRaw = strengthFromZ(antiBaZ);
-		const stickRaw = strengthFromZ(stickZ, STICK_Z_START, STICK_Z_FULL);
+		const corrHighRaw = strengthFromZLocal(corrHighZ);
+		const corrLowRaw = strengthFromZLocal(corrLowZ);
+		const antiAbRaw = strengthFromZLocal(antiAbZ);
+		const antiBaRaw = strengthFromZLocal(antiBaZ);
+		const stickRaw = strengthFromZLocal(stickZ, STICK_Z_START, STICK_Z_FULL);
 
 		// === Update episode states ===
 		const EPISODE_DECAY_THRESHOLD = 0.8;
@@ -703,7 +482,7 @@
 			}
 
 			const effectiveZ = ep.peakZ > EPISODE_Z_THRESHOLD ? Math.max(absZ, ep.peakZ * 0.7) : absZ;
-			ep.strength = strengthFromZ(effectiveZ, STRENGTH_Z_START, STRENGTH_Z_FULL);
+			ep.strength = strengthFromZLocal(effectiveZ, STRENGTH_Z_START, STRENGTH_Z_FULL);
 		}
 
 		updateEpisode('correlated_high', corrHighZ, corrStart);
@@ -1446,207 +1225,40 @@
 	<canvas bind:this={canvasEl} class="lamp" aria-label="Wyrdness visual"></canvas>
 
 	<!-- Bottom bar HUD (always visible) -->
-	<nav class="bottom-bar" aria-label="Controls">
-		<div class="bar-left">
-			<span class="shortcut">? help</span>
-			<span class="shortcut">M mode</span>
-			<span class="shortcut">1-5 speed</span>
-			<span class="shortcut">D demo</span>
-			<span class="shortcut">L legend</span>
-			<span class="shortcut">` debug</span>
-		</div>
-		<div class="bar-center">
-			<span class="state-name"
-				>{DISPLAY_NAMES[dominant]}{getDirectionArrow(dominant)}{getPearsonIndicator(
-					pearsonSpin
-				)}</span
-			>
-		</div>
-		<div class="bar-right">
-			<span class="mode-info">{lightMode === 'wow' ? 'Wow' : 'Mellow'} {responseSpeed}</span>
-			<a href="https://github.com/adamshand/wyrdness" target="_blank" rel="noopener" class="brand">
-				Wyrdness
-				<svg class="github-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-					<path
-						d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-					/>
-				</svg>
-			</a>
-		</div>
-	</nav>
+	<BottomBar {dominant} {pearsonSpin} {lightMode} {responseSpeed} />
 
 	<!-- Legend overlay (top-right) -->
 	{#if showLegend}
-		<aside class="legend-panel" aria-label="Color Legend">
-			<h3>Color Legend</h3>
-			<div class="legend-row">
-				<span class="swatch" style={`--h:${palette.correlated_high.hue}`}></span>
-				<span>Correlated ↑ — both streams have more 1s than expected</span>
-			</div>
-			<div class="legend-row">
-				<span class="swatch" style={`--h:${palette.correlated_low.hue}`}></span>
-				<span>Correlated ↓ — both streams have more 0s than expected</span>
-			</div>
-			<div class="legend-row">
-				<span class="swatch" style={`--h:${palette.anti_ab.hue}`}></span>
-				<span>Diverging A>B — stream A has more 1s and stream B more 0s than expected</span>
-			</div>
-			<div class="legend-row">
-				<span class="swatch" style={`--h:${palette.anti_ba.hue}`}></span>
-				<span>Diverging B>A — stream B has more 1s and stream A more 0s than expected</span>
-			</div>
-			<div class="legend-row">
-				<span class="swatch" style={`--h:${palette.stick.hue}`}></span>
-				<span>Agreement — streams are matching more than expected</span>
-			</div>
-			<div class="legend-row">
-				<span class="swatch" style={`--h:${palette.pearson.hue}`}></span>
-				<span>Pearson — streams trend together (not matching but moving in sync)</span>
-			</div>
-			<div class="legend-row">
-				<span class="indicator">+ −</span>
-				<span>Swirl direction (clockwise/counter)</span>
-			</div>
-		</aside>
+		<LegendPanel />
 	{/if}
 
 	<!-- Dev/debug panel (top-left) -->
 	{#if showDev}
-		<aside class="dev-panel" aria-label="Debug Info">
-			<h3>Debug</h3>
-			<div class="dev-row">
-				<span class="k">Dominant</span>
-				<span class="v">{dominant === 'baseline' ? 'Baseline' : palette[dominant].name}</span>
-			</div>
-			<div class="dev-row">
-				<span class="k">Coherence</span>
-				<span class="v">{(coherence * 100).toFixed(1)}%</span>
-			</div>
-			<div class="dev-row">
-				<span class="k">Significance</span>
-				<span class="v">{(sigEnergy * 100).toFixed(1)}%</span>
-			</div>
-			<div class="dev-row">
-				<span class="k">zA / zB</span>
-				<span class="v">{zA.toFixed(2)} / {zB.toFixed(2)}</span>
-			</div>
-			<div class="dev-row">
-				<span class="k">Pearson r</span>
-				<span class="v">{pearsonR.toFixed(3)}</span>
-			</div>
-			<div class="dev-row">
-				<span class="k">Agree z</span>
-				<span class="v">{zAgree.toFixed(2)}</span>
-			</div>
-			<div class="dev-row">
-				<span class="k">Tick</span>
-				<span class="v">{tickCount}</span>
-			</div>
-			<div class="dev-row">
-				<span class="k">FPS</span>
-				<span class="v">{fps.toFixed(0)}</span>
-			</div>
-			{#if dominant !== 'baseline' && episodes[dominant]}
-				{@const ep = episodes[dominant]}
-				{@const duration = tickCount > 0 ? Math.max(0, cumSumA.length - 1 - ep.startTick) : 0}
-				<div class="dev-row episode">
-					<span class="k">Episode</span>
-					<span class="v">{duration}s | peak z={ep.peakZ.toFixed(2)}</span>
-				</div>
-			{/if}
-			{#if demoBoost > 0.01 && !demoMode}
-				<div class="dev-row demo">
-					<span class="k">Demo Boost</span>
-					<span class="v">{(demoBoost * 100).toFixed(0)}%</span>
-				</div>
-			{/if}
-		</aside>
+		<DevPanel
+			{dominant}
+			{coherence}
+			{sigEnergy}
+			{zA}
+			{zB}
+			{pearsonR}
+			{zAgree}
+			{tickCount}
+			{fps}
+			{episodes}
+			cumLen={cumSumA.length}
+			{demoBoost}
+			{demoMode}
+		/>
 	{/if}
 
 	<!-- Help modal -->
 	{#if showHelp}
-		<div
-			class="modal-backdrop"
-			onclick={() => (showHelp = false)}
-			onkeydown={(e) => e.key === 'Escape' && (showHelp = false)}
-			role="button"
-			tabindex="0"
-			aria-label="Close help"
-		></div>
-		<dialog class="help-modal" open aria-label="Help">
-			<h2>What is Wyrdness?</h2>
-			<p>
-				Wyrdness visualizes patterns in random data. Two streams of random bits (0s and 1s) are
-				continuously compared, looking for moments when they deviate from pure chance.
-			</p>
-			<p>
-				This is an attempt to copy the <a href="https://gowyrd.org/wyrd-light/">Wyrd Light's</a> behaviour
-				in a form that can be easily shared in a Zoom meeting.
-			</p>
-			<h3>What do the colors mean?</h3>
-			<ul>
-				<li>
-					<strong>Correlated</strong> (cyan/blue) — Both streams trending the same direction, more than
-					expected by chance.
-				</li>
-				<li>
-					<strong>Diverging</strong> (orange/coral) — Streams trending in opposite directions, more than
-					expected by chance.
-				</li>
-				<li>
-					<strong>Agreement</strong> (green) — Individual bits matching more often than expected.
-				</li>
-				<li>
-					<strong>Pearson</strong> (purple) — Correlation is the dominant pattern.
-				</li>
-			</ul>
-
-			<h3>What do the symbols mean?</h3>
-			<ul>
-				<li><strong>↑ / ↓</strong> — Direction of the streams (more 1s or more 0s).</li>
-				<li><strong>+ / −</strong> — Pearson correlation direction (positive or negative).</li>
-				<li><strong>A&gt;B or B&gt;A</strong> — One stream has more 1s than the other.</li>
-			</ul>
-
-			<h3>What does brightness mean?</h3>
-			<p>
-				The brighter the orb glows, the more statistically significant the current pattern. When an
-				expanding white ring appears, significance has crossed a threshold.
-			</p>
-
-			<h3>What about the swirling effect?</h3>
-			<p>
-				The swirling motion inside the orb shows correlation between the two streams. It spins
-				clockwise for positive correlation (+) and counter-clockwise for negative (−).
-			</p>
-
-			<h3>Why does this matter?</h3>
-			<p>
-				Some researchers explore whether group intention or focused attention can influence random
-				systems. This is a tool for that exploration — watch for the orb to respond to your group's
-				shared focus.
-			</p>
-
-			<div class="help-footer">
-				<span class="help-hint">Press <kbd>?</kbd> or <kbd>Esc</kbd> to close</span>
-			</div>
-		</dialog>
+		<HelpModal onClose={() => (showHelp = false)} />
 	{/if}
 
 	<!-- Demo mode overlay with big labels -->
 	{#if demoMode}
-		{@const isAnomaly = demoIndex === DEMO_CHANNELS.length}
-		<div class="demo-overlay">
-			<div class="demo-label-main">{isAnomaly ? 'Anomaly' : DEMO_LABELS[demoChannel]}</div>
-			{#if !isAnomaly}
-				<div class="demo-label-pearson">
-					{demoPearsonDir === 1 ? 'Pearson+  (clockwise)' : 'Pearson−  (counter-clockwise)'}
-				</div>
-			{/if}
-			<div class="demo-progress">
-				{demoIndex + 1} / {DEMO_CHANNELS.length + 1}
-			</div>
-		</div>
+		<DemoOverlay {demoIndex} {demoChannel} {demoPearsonDir} />
 	{/if}
 </main>
 
@@ -1662,337 +1274,5 @@
 		width: 100%;
 		height: 100%;
 		display: block;
-	}
-
-	/* === Bottom Bar === */
-	.bottom-bar {
-		position: fixed;
-		bottom: 0;
-		left: 0;
-		right: 0;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 10px 20px;
-		background: rgba(10, 10, 16, 0.5);
-		backdrop-filter: blur(10px);
-		border-top: 1px solid rgba(255, 255, 255, 0.06);
-		color: rgba(255, 255, 255, 0.85);
-		font-size: 13px;
-		user-select: none;
-		z-index: 50;
-	}
-
-	.bar-left {
-		display: flex;
-		gap: 16px;
-		opacity: 0.6;
-		font-size: 12px;
-	}
-
-	.shortcut {
-		white-space: nowrap;
-	}
-
-	.bar-center {
-		position: absolute;
-		left: 50%;
-		transform: translateX(-50%);
-	}
-
-	.state-name {
-		font-size: 16px;
-		font-weight: 500;
-		letter-spacing: 0.02em;
-	}
-
-	.bar-right {
-		display: flex;
-		align-items: center;
-		gap: 16px;
-	}
-
-	.mode-info {
-		font-variant-numeric: tabular-nums;
-		opacity: 0.8;
-	}
-
-	.brand {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		color: rgba(255, 255, 255, 0.9);
-		text-decoration: none;
-		font-weight: 600;
-		letter-spacing: 0.02em;
-	}
-
-	.brand:hover {
-		color: white;
-	}
-
-	.github-icon {
-		width: 16px;
-		height: 16px;
-		opacity: 0.7;
-	}
-
-	.brand:hover .github-icon {
-		opacity: 1;
-	}
-
-	/* === Legend Panel (top-right) === */
-	.legend-panel {
-		position: fixed;
-		top: 18px;
-		right: 18px;
-		width: min(340px, calc(100vw - 36px));
-		padding: 14px 16px;
-		border-radius: 14px;
-		color: rgba(255, 255, 255, 0.9);
-		background: rgba(10, 10, 16, 0.65);
-		backdrop-filter: blur(12px);
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
-		font-size: 12px;
-		z-index: 60;
-	}
-
-	.legend-panel h3 {
-		margin: 0 0 8px;
-		font-size: 11px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		opacity: 0.6;
-	}
-
-	.legend-panel h3:not(:first-child) {
-		margin-top: 14px;
-	}
-
-	.legend-row {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 4px 0;
-		line-height: 1.4;
-	}
-
-	.swatch {
-		width: 14px;
-		height: 14px;
-		border-radius: 999px;
-		background: radial-gradient(
-			circle at 30% 30%,
-			hsla(var(--h) 90% 70% / 0.95),
-			hsla(var(--h) 90% 45% / 0.95)
-		);
-		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
-		flex: 0 0 auto;
-	}
-
-	.indicator {
-		width: 14px;
-		text-align: center;
-		font-weight: 600;
-		opacity: 0.9;
-		flex: 0 0 auto;
-	}
-
-	/* === Dev Panel (top-left) === */
-	.dev-panel {
-		position: fixed;
-		top: 18px;
-		left: 18px;
-		width: min(280px, calc(100vw - 36px));
-		padding: 14px 16px;
-		border-radius: 14px;
-		color: rgba(255, 255, 255, 0.9);
-		background: rgba(10, 10, 16, 0.65);
-		backdrop-filter: blur(12px);
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
-		font-size: 12px;
-		z-index: 60;
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-	}
-
-	.dev-panel h3 {
-		margin: 0 0 10px;
-		font-size: 11px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		opacity: 0.6;
-	}
-
-	.dev-row {
-		display: flex;
-		justify-content: space-between;
-		gap: 12px;
-		padding: 2px 0;
-	}
-
-	.dev-row .k {
-		opacity: 0.6;
-	}
-
-	.dev-row .v {
-		font-variant-numeric: tabular-nums;
-	}
-
-	.dev-row.demo {
-		color: rgba(255, 200, 100, 0.9);
-	}
-
-	.dev-row.episode {
-		color: rgba(180, 220, 255, 0.9);
-	}
-
-	/* === Help Modal === */
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		backdrop-filter: blur(4px);
-		z-index: 200;
-	}
-
-	.help-modal {
-		position: fixed;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-		width: min(600px, calc(100vw - 48px));
-		max-height: calc(100vh - 80px);
-		overflow-y: auto;
-		padding: 28px 32px;
-		border-radius: 18px;
-		background: rgba(18, 18, 26, 0.95);
-		backdrop-filter: blur(20px);
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-		color: rgba(255, 255, 255, 0.9);
-		z-index: 210;
-	}
-
-	.help-modal h2 {
-		margin: 0 0 16px;
-		font-size: 24px;
-		font-weight: 600;
-	}
-
-	.help-modal h3 {
-		margin: 20px 0 10px;
-		font-size: 15px;
-		font-weight: 600;
-		opacity: 0.95;
-	}
-
-	.help-modal p {
-		margin: 0 0 12px;
-		line-height: 1.6;
-		font-size: 14px;
-		opacity: 0.85;
-	}
-
-	.help-modal ul {
-		margin: 0 0 12px;
-		padding-left: 20px;
-		line-height: 1.7;
-		font-size: 14px;
-		opacity: 0.85;
-	}
-
-	.help-modal li {
-		margin-bottom: 6px;
-	}
-
-	.help-modal strong {
-		color: white;
-		font-weight: 600;
-	}
-
-	.help-footer {
-		margin-top: 24px;
-		padding-top: 16px;
-		border-top: 1px solid rgba(255, 255, 255, 0.1);
-		text-align: center;
-	}
-
-	.help-hint {
-		font-size: 12px;
-		opacity: 0.5;
-	}
-
-	.help-modal kbd {
-		display: inline-block;
-		padding: 2px 6px;
-		border-radius: 4px;
-		background: rgba(255, 255, 255, 0.1);
-		border: 1px solid rgba(255, 255, 255, 0.15);
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-		font-size: 11px;
-	}
-
-	/* === Demo Mode Overlay === */
-	.demo-overlay {
-		position: fixed;
-		inset: 0;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		pointer-events: none;
-		z-index: 100;
-	}
-
-	.demo-label-main {
-		font-size: clamp(2rem, 8vw, 5rem);
-		font-weight: 700;
-		color: rgba(255, 255, 255, 0.95);
-		text-shadow:
-			0 0 40px rgba(0, 0, 0, 0.8),
-			0 0 80px rgba(0, 0, 0, 0.6),
-			0 4px 20px rgba(0, 0, 0, 0.9);
-		text-align: center;
-		padding: 0 1rem;
-	}
-
-	.demo-label-pearson {
-		font-size: clamp(1rem, 4vw, 2rem);
-		font-weight: 400;
-		color: rgba(255, 255, 255, 0.75);
-		text-shadow:
-			0 0 30px rgba(0, 0, 0, 0.8),
-			0 2px 10px rgba(0, 0, 0, 0.9);
-		margin-top: 0.5rem;
-		text-align: center;
-	}
-
-	.demo-progress {
-		font-size: clamp(0.8rem, 2vw, 1.2rem);
-		font-weight: 400;
-		color: rgba(255, 255, 255, 0.5);
-		margin-top: 1.5rem;
-		font-variant-numeric: tabular-nums;
-	}
-
-	/* === Responsive === */
-	@media (max-width: 640px) {
-		.bar-left {
-			display: none;
-		}
-
-		.bottom-bar {
-			justify-content: center;
-			gap: 20px;
-		}
-
-		.bar-center {
-			position: static;
-			transform: none;
-		}
 	}
 </style>
