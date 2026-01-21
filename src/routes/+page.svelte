@@ -62,9 +62,29 @@
 	let showLegend = $state(false);
 	let renderMode = $state<RenderMode>('orb');
 	let lightMode = $state<LightMode>('mellow'); // default to mellow for calmer experience
+	let responseSpeed = $state<1 | 2 | 3 | 4 | 5>(3); // 1=slowest, 5=fastest, 3=default
 
-	// Derived preset from current mode
-	const preset = $derived(MODE_PRESETS[lightMode]);
+	// Speed multipliers: speed 3 is baseline (1.0x), speed 1 is slower, speed 5 is faster
+	const SPEED_MULTIPLIERS: Record<1 | 2 | 3 | 4 | 5, number> = {
+		1: 1.8, // slowest - 1.8x tau (slower response)
+		2: 1.35,
+		3: 1.0, // baseline
+		4: 0.7,
+		5: 0.45 // fastest - 0.45x tau (faster response)
+	};
+
+	// Derived preset from current mode, with speed applied
+	const basePreset = $derived(MODE_PRESETS[lightMode]);
+	const speedMult = $derived(SPEED_MULTIPLIERS[responseSpeed]);
+	const preset = $derived({
+		...basePreset,
+		stageEnergyRiseMs: basePreset.stageEnergyRiseMs * speedMult,
+		stageEnergyFallMs: basePreset.stageEnergyFallMs * speedMult,
+		sigEnergyRiseMs: basePreset.sigEnergyRiseMs * speedMult,
+		sigEnergyFallMs: basePreset.sigEnergyFallMs * speedMult,
+		hueTauMs: basePreset.hueTauMs * speedMult,
+		satTauMs: basePreset.satTauMs * speedMult
+	});
 
 	// === Signal Engine Config ===
 	// 200-bit samples at 1Hz matches Wyrd's description
@@ -980,7 +1000,8 @@
 
 		const bootT = clamp01(bootMs / 5000);
 		const bootLock = bootT < 1;
-		const e = stageEnergyRender; // Use smoothed version for rendering
+		const e = stageEnergyRender; // stageEnergy for stage transitions and color effects
+		const sig = sigEnergyRender; // sigEnergy (statistical significance) for brightness
 
 		const cx = w * 0.5;
 		const cy = h * 0.54;
@@ -994,15 +1015,18 @@
 		const polarity = Math.max(-1, Math.min(1, (zA + zB) / 6));
 		hue = (hue + polarity * 10 + 6 * Math.sin(t * 0.08) + 3 * Math.sin(t * 0.13 + 1.7)) % 360;
 
+		// Whitening still uses stageEnergy (for stage-based effects)
 		const whitenStage2 = smoothstep(0.36, 0.78, e) * 0.62;
 		const sheen = stage === 3 ? smoothstep(0.68, 0.98, e) : 0;
 		const whitenStage3 = stage === 3 ? 0.62 + sheen * 0.12 : 0;
 		const whiten = stage === 1 ? 0 : stage === 2 ? whitenStage2 : whitenStage3;
 
-		const eVis = Math.max(e, 0.08);
-		// Apply mode's maxBrightness multiplier
-		const brightness = (0.16 + 0.95 * Math.pow(eVis, 0.86)) * preset.maxBrightness;
-		const orbAlpha = 0.6 + 0.3 * brightness;
+		// Brightness now driven by statistical significance (sigEnergy)
+		// More aggressive curve: very dim at baseline, dramatic when significant
+		// "The brighter the Light, the smaller the probability that it is happening by chance"
+		const sigVis = Math.max(sig, 0.03); // small floor to avoid total darkness
+		const brightness = (0.08 + 0.92 * Math.pow(sigVis, 1.3)) * preset.maxBrightness;
+		const orbAlpha = 0.5 + 0.4 * brightness;
 
 		// Orb with clip
 		ctx.save();
@@ -1315,6 +1339,11 @@
 			lightMode = lightMode === 'wow' ? 'mellow' : 'wow';
 			return;
 		}
+		// 1-5 = set response speed
+		if (e.key >= '1' && e.key <= '5') {
+			responseSpeed = parseInt(e.key) as 1 | 2 | 3 | 4 | 5;
+			return;
+		}
 		// C = cheat: inject fake coherence spike
 		if (e.key === 'c' || e.key === 'C') {
 			cheatBoost = Math.min(1, cheatBoost + 0.6);
@@ -1374,7 +1403,9 @@
 		<section class="hud" aria-label="HUD">
 			<div class="hud-title">
 				<div class="hud-name">Wyrdlight</div>
-				<div class="hud-mode">{lightMode === 'wow' ? 'Wow' : 'Mellow'} | Stage {stage}</div>
+				<div class="hud-mode">
+					{lightMode === 'wow' ? 'Wow' : 'Mellow'} | Speed {responseSpeed} | Stage {stage}
+				</div>
 			</div>
 
 			<div class="hud-row">
@@ -1482,8 +1513,8 @@
 			{/if}
 
 			<div class="hint mono">
-				H: HUD &nbsp; M: wow/mellow &nbsp; B: render &nbsp; C: cheat &nbsp; R: reset &nbsp; F:
-				fullscreen &nbsp; S: settings &nbsp; L: legend
+				H: HUD &nbsp; M: mode &nbsp; 1-5: speed &nbsp; B: render &nbsp; C: cheat &nbsp; R: reset
+				&nbsp; F: fullscreen &nbsp; S: settings &nbsp; L: legend
 			</div>
 		</section>
 	{/if}
