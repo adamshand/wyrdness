@@ -137,13 +137,6 @@ Design intent:
 - speeds up as `|pearson|` increases
 - direction reversal is noticeable but not jarring
 
-## Render Modes
-
-Two render modes available (toggle with `B` key):
-
-1. **Orb mode** (default): full visual orb with all effects
-2. **Signal mode**: simplified circle with strip chart showing coherence/stageEnergy history
-
 ## Performance / UX Constraints
 
 - No `cancelAnimationFrame` or other browser-only APIs in SSR lifecycle.
@@ -152,34 +145,54 @@ Two render modes available (toggle with `B` key):
 
 - The render loop is `requestAnimationFrame`, with dt clamping (`Math.min(80, dt)`).
 - `renderScale` (0.75) controls internal canvas resolution (performance/softness).
-- Per-frame smoothing of `stageEnergyRender` and `sigEnergyRender` eliminates stepping from discrete ticks.
+- Per-frame smoothing of `sigEnergyRender` eliminates stepping from discrete ticks.
 - Channel strengths (`rawRender`) are smoothed with asymmetric tau (1800ms rise, 4000ms fall).
 
 ## HUD + Controls
 
-Hotkeys:
+The HUD is a discreet bottom bar showing the current state and controls.
 
-- `H` toggle HUD
-- `?` show HUD
-- `S` toggle settings panel
-- `L` toggle legend
-- `R` reseed (reset all state)
-- `F` fullscreen
-- `B` toggle render mode (orb/signal)
-- `C` cheat boost (inject fake coherence for testing)
+### Bottom Bar Layout
 
-Settings panel exposes:
+- **Left**: Keyboard shortcuts (? help, M mode, 1-5 speed, D demo, L legend)
+- **Center**: Current state name with direction arrows (↑/↓) and Pearson indicator (+/−)
+- **Right**: Mode/speed info, "Wyrdness" brand with GitHub link
 
-- `updatesPerSec` (1-5): signal tick rate
+### Hotkeys
 
-## Cheat / Debug Mode
+- `H` toggle bottom bar HUD
+- `?` show help modal (layperson explanation)
+- `L` toggle legend overlay (top-right)
+- `` ` `` toggle dev/debug panel (top-left)
+- `M` cycle mode (Wow/Mellow)
+- `1-5` set response speed
+- `D` toggle demo mode (auto-cycling showcase)
+- `Escape` close modals or stop demo
 
-For testing visual responses without waiting for random episodes:
+### State Display Names
 
-- `C` key injects `cheatBoost` (+0.6, capped at 1.0)
-- Boost is applied to `cheatChannel` (default: correlated)
-- Decays at 0.97 per tick (~23 seconds to halve at 1Hz)
-- Affects both coherence and p-value calculations
+User-friendly names shown in the center of the bottom bar:
+
+| Internal        | Displayed    |
+| --------------- | ------------ |
+| baseline        | Baseline     |
+| correlated_high | Correlated ↑ |
+| correlated_low  | Correlated ↓ |
+| anti_ab         | Diverging    |
+| anti_ba         | Diverging    |
+| stick           | Agreement    |
+
+Pearson +/− appears after the name when |r| > 0.05.
+
+## Demo Mode
+
+For showcasing all visual responses:
+
+- `D` key starts auto-cycling through all 5 channels
+- 3 seconds per channel with smooth sin² envelope
+- Pearson direction alternates each channel (+, -, +, -, +)
+- Big centered labels show channel name and Pearson direction
+- Triggers significance pulse at peak of each channel
 
 ## QRNG Integration Plan (Future Work)
 

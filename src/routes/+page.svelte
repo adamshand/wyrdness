@@ -8,7 +8,7 @@
 		| 'anti_ab'
 		| 'anti_ba'
 		| 'stick';
-	type RenderMode = 'orb' | 'signal';
+
 	type LightMode = 'wow' | 'mellow';
 
 	// === Mode Presets ===
@@ -56,10 +56,10 @@
 	let canvasEl: HTMLCanvasElement;
 
 	// === UI State ===
-	let showHud = $state(true);
-	let showSettings = $state(false);
+	let showHelp = $state(false);
 	let showLegend = $state(false);
-	let renderMode = $state<RenderMode>('orb');
+	let showDev = $state(false);
+
 	let lightMode = $state<LightMode>('mellow'); // default to mellow for calmer experience
 	let responseSpeed = $state<1 | 2 | 3 | 4 | 5>(3); // 1=slowest, 5=fastest, 3=default
 
@@ -148,13 +148,13 @@
 		'stick'
 	];
 	const DEMO_LABELS: Record<Exclude<Channel, 'baseline'>, string> = {
-		correlated_high: 'Both streams HIGH',
-		correlated_low: 'Both streams LOW',
-		anti_ab: 'A high, B low',
-		anti_ba: 'B high, A low',
-		stick: 'Bits matching'
+		correlated_high: 'Correlated ↑',
+		correlated_low: 'Correlated ↓',
+		anti_ab: 'Diverging A>B',
+		anti_ba: 'Diverging B>A',
+		stick: 'Agreement'
 	};
-	const DEMO_DURATION_MS = 3000; // 3 seconds per channel
+	const DEMO_DURATION_MS = 5000; // 5 seconds per channel
 
 	let demoMode = $state(false); // whether auto-cycling is active
 	let demoBoost = $state(0); // injected fake coherence (0..1)
@@ -163,12 +163,6 @@
 	let demoPearsonDir = $state<1 | -1>(1); // alternates each channel
 	let demoStartTime = $state(0); // timestamp when current channel started
 	let demoPearsonBoost = $state(0); // injected Pearson value for spin effect
-
-	// === History for strip chart (last 180 seconds at 1Hz) ===
-	const HISTORY_LEN = 180;
-	let historyCoherence: number[] = $state([]);
-	let historyDominant: Channel[] = $state([]);
-	let historyPearson: number[] = $state([]);
 
 	// === Internal ===
 	let raf = 0;
@@ -240,6 +234,30 @@
 		anti_ba: { hue: 8, name: 'Anti B>A' }, // Coral/red (B high, A low)
 		stick: { hue: 112, name: 'Stick' } // Green (agreement)
 	};
+
+	// User-friendly display names for the bottom bar
+	const DISPLAY_NAMES: Record<Channel, string> = {
+		baseline: 'Baseline',
+		correlated_high: 'Correlated',
+		correlated_low: 'Correlated',
+		anti_ab: 'Diverging A>B',
+		anti_ba: 'Diverging B>A',
+		stick: 'Agreement'
+	};
+
+	// Get arrow indicator for high/low channels
+	function getDirectionArrow(channel: Channel): string {
+		if (channel === 'correlated_high') return ' ↑';
+		if (channel === 'correlated_low') return ' ↓';
+		return '';
+	}
+
+	// Get Pearson +/- indicator (only when significant)
+	const PEARSON_DISPLAY_THRESHOLD = 0.05;
+	function getPearsonIndicator(r: number): string {
+		if (Math.abs(r) < PEARSON_DISPLAY_THRESHOLD) return '';
+		return r > 0 ? ' +' : ' −';
+	}
 
 	// === Utility Functions ===
 	function clamp01(v: number) {
@@ -462,11 +480,6 @@
 			anti_ba: defaultEpisode(),
 			stick: defaultEpisode()
 		};
-
-		// Clear history
-		historyCoherence = [];
-		historyDominant = [];
-		historyPearson = [];
 
 		// Reset significance pulse state
 		sigPulseStart = 0;
@@ -756,11 +769,6 @@
 		const sigTau = targetSig > sigEnergy ? preset.sigEnergyRiseMs : preset.sigEnergyFallMs;
 		const sk = 1 - Math.exp(-dtMs / sigTau);
 		sigEnergy = sigEnergy + (targetSig - sigEnergy) * sk;
-
-		// Record history
-		historyCoherence = [...historyCoherence.slice(-(HISTORY_LEN - 1)), coherence];
-		historyDominant = [...historyDominant.slice(-(HISTORY_LEN - 1)), dominant];
-		historyPearson = [...historyPearson.slice(-(HISTORY_LEN - 1)), pearsonR];
 	}
 
 	function step(dtMs: number) {
@@ -789,6 +797,10 @@
 		}
 
 		// === Demo Mode Sequencing ===
+		// 6 segments: 5 channels + 1 anomaly segment at the end
+		const DEMO_TOTAL_SEGMENTS = 6;
+		const isAnomalySegment = demoIndex === DEMO_CHANNELS.length; // index 5
+
 		if (demoMode) {
 			const now = performance.now();
 			const elapsed = now - demoStartTime;
@@ -797,26 +809,40 @@
 			const t = Math.min(1, elapsed / DEMO_DURATION_MS);
 			const envelope = Math.pow(Math.sin(Math.PI * t), 2);
 			const prevEnvelope = demoBoost / 0.85; // Previous envelope value
-			demoBoost = 0.85 * envelope;
-			demoPearsonBoost = 0.35 * demoPearsonDir * envelope;
 
-			// Trigger significance pulse when envelope crosses 0.5 on the way up
-			// This shows the expanding ring effect during each channel's demo
-			if (envelope >= 0.5 && prevEnvelope < 0.5) {
-				sigPulseStart = now;
+			if (isAnomalySegment) {
+				// Anomaly segment: baseline color, significance builds up, ring effect once at peak
+				demoBoost = 0;
+				demoPearsonBoost = 0;
+				dominant = 'baseline';
+				dominance = 0;
+
+				// Build up sigEnergy using the envelope (starts low, peaks in middle, fades)
+				sigEnergyRender = envelope * 0.7;
+
+				// Trigger ring effect once when crossing threshold on the way UP
+				// Uses sigWasAboveThreshold which is updated at end of step()
+				const isAbove = sigEnergyRender >= SIG_PULSE_THRESHOLD;
+				if (isAbove && !sigWasAboveThreshold) {
+					sigPulseStart = now;
+				}
+			} else {
+				// Regular channel segments
+				demoBoost = 0.85 * envelope;
+				demoPearsonBoost = 0.35 * demoPearsonDir * envelope;
+
+				// Force sigEnergy high during demo so core is visible
+				sigEnergyRender = envelope * 0.7;
+
+				// Force dominant channel during demo (bypass normal selection)
+				dominant = demoChannel;
+				dominance = envelope;
 			}
 
-			// Force sigEnergy high during demo so core is visible
-			sigEnergyRender = envelope * 0.7;
-
-			// Force dominant channel during demo (bypass normal selection)
-			dominant = demoChannel;
-			dominance = envelope;
-
 			if (elapsed >= DEMO_DURATION_MS) {
-				// Move to next channel
+				// Move to next segment
 				demoIndex++;
-				if (demoIndex >= DEMO_CHANNELS.length) {
+				if (demoIndex >= DEMO_TOTAL_SEGMENTS) {
 					// Demo complete
 					demoMode = false;
 					demoBoost = 0;
@@ -824,10 +850,13 @@
 					// Reset to baseline after demo
 					dominant = 'baseline';
 					dominance = 0;
-				} else {
+				} else if (demoIndex < DEMO_CHANNELS.length) {
 					// Advance to next channel
 					demoChannel = DEMO_CHANNELS[demoIndex];
 					demoPearsonDir = demoPearsonDir === 1 ? -1 : 1; // Alternate direction
+					demoStartTime = now;
+				} else {
+					// Entering anomaly segment
 					demoStartTime = now;
 				}
 			}
@@ -889,20 +918,28 @@
 		}
 
 		// Detect significance threshold crossing and trigger pulse
+		// Skip automatic detection during demo mode (anomaly segment triggers pulse explicitly)
 		{
 			const now = performance.now();
 			const isAbove = sigEnergyRender >= SIG_PULSE_THRESHOLD;
-			const cooledDown = now - sigPulseLastTime >= SIG_PULSE_COOLDOWN;
 
-			// Trigger pulse on upward crossing (was below, now above) with cooldown
-			if (isAbove && !sigWasAboveThreshold && cooledDown && !bootLock) {
-				sigPulseStart = now;
-				sigPulseLastTime = now;
+			if (!demoMode) {
+				const cooledDown = now - sigPulseLastTime >= SIG_PULSE_COOLDOWN;
+
+				// Trigger pulse on upward crossing (was below, now above) with cooldown
+				if (isAbove && !sigWasAboveThreshold && cooledDown && !bootLock) {
+					sigPulseStart = now;
+					sigPulseLastTime = now;
+				}
 			}
 
+			// Always track threshold state (prevents stale state after demo ends)
 			sigWasAboveThreshold = isAbove;
+		}
 
-			// Clear pulse after duration
+		// Clear pulse after duration (always runs, including during demo)
+		{
+			const now = performance.now();
 			if (sigPulseStart > 0 && now - sigPulseStart >= SIG_PULSE_DURATION) {
 				sigPulseStart = 0;
 			}
@@ -936,11 +973,7 @@
 		const sk = 1 - Math.exp(-dtMs / preset.satTauMs);
 		satSmooth = satSmooth + (satTarget - satSmooth) * sk;
 
-		if (renderMode === 'orb') {
-			renderOrb(rawRender);
-		} else {
-			renderSignal();
-		}
+		renderOrb(rawRender);
 	}
 
 	// === Resize ===
@@ -960,132 +993,7 @@
 		bufCanvas.height = bh;
 	}
 
-	// === Signal Mode Render (Boring Mode) ===
-	function renderSignal() {
-		const w = bufCanvas.width;
-		const h = bufCanvas.height;
-		const ctx = bufCtx;
-
-		ctx.save();
-		ctx.fillStyle = '#05060a';
-		ctx.fillRect(0, 0, w, h);
-
-		const cx = w * 0.5;
-		const cy = h * 0.35;
-		const r = Math.min(w, h) * 0.18;
-
-		// Simple brightness circle based on sigEnergy
-		const brightness = 0.1 + 0.9 * sigEnergyRender;
-		const hue = hueSmooth;
-
-		ctx.beginPath();
-		ctx.arc(cx, cy, r, 0, Math.PI * 2);
-		ctx.closePath();
-
-		const g = ctx.createRadialGradient(cx, cy, r * 0.1, cx, cy, r);
-		g.addColorStop(
-			0,
-			`hsla(${hue} 60% ${Math.round(20 + 50 * brightness)}% / ${0.6 + 0.4 * brightness})`
-		);
-		g.addColorStop(
-			0.7,
-			`hsla(${hue} 50% ${Math.round(15 + 30 * brightness)}% / ${0.3 + 0.4 * brightness})`
-		);
-		g.addColorStop(1, `hsla(${hue} 40% 10% / 0.1)`);
-		ctx.fillStyle = g;
-		ctx.fill();
-
-		// Outer glow
-		ctx.filter = 'blur(20px)';
-		ctx.globalCompositeOperation = 'screen';
-		const glow = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, r * 1.5);
-		glow.addColorStop(0, `hsla(${hue} 50% 50% / ${0.2 * brightness})`);
-		glow.addColorStop(1, 'transparent');
-		ctx.fillStyle = glow;
-		ctx.fillRect(0, 0, w, h);
-		ctx.filter = 'none';
-		ctx.globalCompositeOperation = 'source-over';
-
-		// Strip chart
-		const chartY = h * 0.58;
-		const chartH = h * 0.32;
-		const chartX = w * 0.1;
-		const chartW = w * 0.8;
-
-		// Chart background
-		ctx.fillStyle = 'rgba(255,255,255,0.03)';
-		ctx.fillRect(chartX, chartY, chartW, chartH);
-		ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-		ctx.lineWidth = 1;
-		ctx.strokeRect(chartX, chartY, chartW, chartH);
-
-		// Grid lines at 25%, 50%, 75%
-		ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-		for (const frac of [0.25, 0.5, 0.75]) {
-			const y = chartY + chartH * (1 - frac);
-			ctx.beginPath();
-			ctx.moveTo(chartX, y);
-			ctx.lineTo(chartX + chartW, y);
-			ctx.stroke();
-		}
-
-		// Draw coherence history (yellow)
-		if (historyCoherence.length > 1) {
-			ctx.strokeStyle = 'rgba(255, 220, 100, 0.7)';
-			ctx.lineWidth = 2;
-			ctx.beginPath();
-			for (let i = 0; i < historyCoherence.length; i++) {
-				const x = chartX + (i / (HISTORY_LEN - 1)) * chartW;
-				const y = chartY + chartH * (1 - historyCoherence[i]);
-				if (i === 0) ctx.moveTo(x, y);
-				else ctx.lineTo(x, y);
-			}
-			ctx.stroke();
-		}
-
-		// Draw Pearson history (cyan)
-		if (historyPearson.length > 1) {
-			ctx.strokeStyle = 'rgba(100, 220, 255, 0.7)';
-			ctx.lineWidth = 2;
-			ctx.beginPath();
-			for (let i = 0; i < historyPearson.length; i++) {
-				const x = chartX + (i / (HISTORY_LEN - 1)) * chartW;
-				// Pearson ranges -1 to 1, map to 0-1 for display
-				const y = chartY + chartH * (1 - (historyPearson[i] + 1) / 2);
-				if (i === 0) ctx.moveTo(x, y);
-				else ctx.lineTo(x, y);
-			}
-			ctx.stroke();
-		}
-
-		// Labels
-		ctx.fillStyle = 'rgba(255, 220, 100, 0.8)';
-		ctx.font = '12px monospace';
-		ctx.fillText('coherence', chartX + 4, chartY + 14);
-		ctx.fillStyle = 'rgba(100, 220, 255, 0.8)';
-		ctx.fillText('pearson', chartX + 80, chartY + 14);
-
-		// Time labels
-		ctx.fillStyle = 'rgba(255,255,255,0.4)';
-		ctx.font = '10px monospace';
-		ctx.fillText('-3m', chartX, chartY + chartH + 12);
-		ctx.fillText('-2m', chartX + chartW * 0.33, chartY + chartH + 12);
-		ctx.fillText('-1m', chartX + chartW * 0.67, chartY + chartH + 12);
-		ctx.fillText('now', chartX + chartW - 20, chartY + chartH + 12);
-
-		ctx.restore();
-
-		// Blit to main canvas
-		const out = canvasEl.getContext('2d');
-		if (!out) return;
-		out.save();
-		out.imageSmoothingEnabled = true;
-		out.clearRect(0, 0, canvasEl.width, canvasEl.height);
-		out.drawImage(bufCanvas, 0, 0, canvasEl.width, canvasEl.height);
-		out.restore();
-	}
-
-	// === Orb Mode Render ===
+	// === Orb Render ===
 	function renderOrb(raw: Record<Exclude<Channel, 'baseline'>, number>) {
 		const w = bufCanvas.width;
 		const h = bufCanvas.height;
@@ -1405,15 +1313,6 @@
 	}
 
 	// === Keyboard Handling ===
-	function toggleFullscreen() {
-		const el = document.documentElement;
-		if (!document.fullscreenElement) {
-			void el.requestFullscreen?.();
-		} else {
-			void document.exitFullscreen?.();
-		}
-	}
-
 	function handleKeydown(e: KeyboardEvent) {
 		const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
 		if (
@@ -1423,35 +1322,19 @@
 		)
 			return;
 
-		if (e.key === 'h' || e.key === 'H') {
-			showHud = !showHud;
-			return;
-		}
+		// ? = toggle help modal
 		if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
-			showHud = true;
+			showHelp = !showHelp;
 			return;
 		}
-		if (e.key === 's' || e.key === 'S') {
-			showSettings = !showSettings;
-			showHud = true;
-			return;
-		}
+		// L = toggle legend overlay
 		if (e.key === 'l' || e.key === 'L') {
 			showLegend = !showLegend;
-			showHud = true;
 			return;
 		}
-		if (e.key === 'r' || e.key === 'R') {
-			reseed();
-			return;
-		}
-		if (e.key === 'f' || e.key === 'F') {
-			toggleFullscreen();
-			return;
-		}
-		// B = toggle render mode (boring/orb)
-		if (e.key === 'b' || e.key === 'B') {
-			renderMode = renderMode === 'orb' ? 'signal' : 'orb';
+		// ` = toggle dev/debug panel
+		if (e.key === '`') {
+			showDev = !showDev;
 			return;
 		}
 		// M = toggle light mode (wow/mellow)
@@ -1483,13 +1366,18 @@
 			}
 			return;
 		}
+		// Escape = close modals or stop demo
 		if (e.key === 'Escape') {
 			if (demoMode) {
 				demoMode = false;
 				demoBoost = 0;
 				demoPearsonBoost = 0;
-			} else if (showSettings) {
-				showSettings = false;
+			} else if (showHelp) {
+				showHelp = false;
+			} else if (showLegend) {
+				showLegend = false;
+			} else if (showDev) {
+				showDev = false;
 			}
 		}
 	}
@@ -1537,145 +1425,213 @@
 </script>
 
 <main class="wrap">
-	<canvas bind:this={canvasEl} class="lamp" aria-label="Wyrd Light visual"></canvas>
+	<canvas bind:this={canvasEl} class="lamp" aria-label="Wyrdness visual"></canvas>
 
-	{#if showHud}
-		<section class="hud" aria-label="HUD">
-			<div class="hud-title">
-				<div class="hud-name">Wyrdlight</div>
-				<div class="hud-mode">
-					{lightMode === 'wow' ? 'Wow' : 'Mellow'} | Speed {responseSpeed}
-				</div>
+	<!-- Bottom bar HUD (always visible) -->
+	<nav class="bottom-bar" aria-label="Controls">
+		<div class="bar-left">
+			<span class="shortcut">? help</span>
+			<span class="shortcut">M mode</span>
+			<span class="shortcut">1-5 speed</span>
+			<span class="shortcut">D demo</span>
+			<span class="shortcut">L legend</span>
+		</div>
+		<div class="bar-center">
+			<span class="state-name"
+				>{DISPLAY_NAMES[dominant]}{getDirectionArrow(dominant)}{getPearsonIndicator(
+					pearsonSpin
+				)}</span
+			>
+		</div>
+		<div class="bar-right">
+			<span class="mode-info">{lightMode === 'wow' ? 'Wow' : 'Mellow'} {responseSpeed}</span>
+			<a href="https://github.com/adamshand/wyrdness" target="_blank" rel="noopener" class="brand">
+				Wyrdness
+				<svg class="github-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+					<path
+						d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+					/>
+				</svg>
+			</a>
+		</div>
+	</nav>
+
+	<!-- Legend overlay (top-right) -->
+	{#if showLegend}
+		<aside class="legend-panel" aria-label="Color Legend">
+			<h3>Color Legend</h3>
+			<div class="legend-row">
+				<span class="swatch" style={`--h:${palette.correlated_high.hue}`}></span>
+				<span>Correlated ↑ — both streams high (more than expected)</span>
 			</div>
+			<div class="legend-row">
+				<span class="swatch" style={`--h:${palette.correlated_low.hue}`}></span>
+				<span>Correlated ↓ — both streams low (more than expected)</span>
+			</div>
+			<div class="legend-row">
+				<span class="swatch" style={`--h:${palette.anti_ab.hue}`}></span>
+				<span>Diverging A>B — Stream A high, Stream B low</span>
+			</div>
+			<div class="legend-row">
+				<span class="swatch" style={`--h:${palette.anti_ba.hue}`}></span>
+				<span>Diverging B>A — Stream B high, Stream A low</span>
+			</div>
+			<div class="legend-row">
+				<span class="swatch" style={`--h:${palette.stick.hue}`}></span>
+				<span>Agreement — bits matching more than expected</span>
+			</div>
+			<div class="legend-row">
+				<span class="swatch spin-swatch"></span>
+				<span>Swirl + / − — correlation direction (clockwise/counter)</span>
+			</div>
+			<h3>Indicators</h3>
+			<div class="legend-row">
+				<span class="indicator">↑ ↓</span>
+				<span>Stream direction (high/low)</span>
+			</div>
+			<div class="legend-row">
+				<span class="indicator">+ −</span>
+				<span>Pearson correlation (positive/negative)</span>
+			</div>
+			<div class="legend-row">
+				<span class="indicator">◯</span>
+				<span>Expanding ring — statistical significance threshold crossed</span>
+			</div>
+		</aside>
+	{/if}
 
-			<div class="hud-row">
+	<!-- Dev/debug panel (top-left) -->
+	{#if showDev}
+		<aside class="dev-panel" aria-label="Debug Info">
+			<h3>Debug</h3>
+			<div class="dev-row">
 				<span class="k">Dominant</span>
 				<span class="v">{dominant === 'baseline' ? 'Baseline' : palette[dominant].name}</span>
 			</div>
-			<div class="hud-row">
+			<div class="dev-row">
 				<span class="k">Coherence</span>
 				<span class="v">{(coherence * 100).toFixed(1)}%</span>
 			</div>
-			<div class="hud-row">
+			<div class="dev-row">
 				<span class="k">Significance</span>
 				<span class="v">{(sigEnergy * 100).toFixed(1)}%</span>
 			</div>
-			<div class="hud-row">
+			<div class="dev-row">
 				<span class="k">zA / zB</span>
 				<span class="v">{zA.toFixed(2)} / {zB.toFixed(2)}</span>
 			</div>
-			<div class="hud-row">
+			<div class="dev-row">
 				<span class="k">Pearson r</span>
 				<span class="v">{pearsonR.toFixed(3)}</span>
 			</div>
-			<div class="hud-row">
+			<div class="dev-row">
 				<span class="k">Agree z</span>
 				<span class="v">{zAgree.toFixed(2)}</span>
 			</div>
-			<div class="hud-row">
+			<div class="dev-row">
 				<span class="k">Tick</span>
 				<span class="v">{tickCount}</span>
 			</div>
-			<div class="hud-row">
+			<div class="dev-row">
 				<span class="k">FPS</span>
 				<span class="v">{fps.toFixed(0)}</span>
 			</div>
-
 			{#if dominant !== 'baseline' && episodes[dominant]}
 				{@const ep = episodes[dominant]}
 				{@const duration = tickCount > 0 ? Math.max(0, cumSumA.length - 1 - ep.startTick) : 0}
-				<div class="hud-row episode">
+				<div class="dev-row episode">
 					<span class="k">Episode</span>
 					<span class="v">{duration}s | peak z={ep.peakZ.toFixed(2)}</span>
 				</div>
 			{/if}
-
 			{#if demoBoost > 0.01 && !demoMode}
-				<div class="hud-row demo">
+				<div class="dev-row demo">
 					<span class="k">Demo Boost</span>
 					<span class="v">{(demoBoost * 100).toFixed(0)}%</span>
 				</div>
 			{/if}
+		</aside>
+	{/if}
 
-			<div class="hud-actions">
-				<button
-					class="hud-btn"
-					type="button"
-					onclick={() => (lightMode = lightMode === 'wow' ? 'mellow' : 'wow')}
-					title="Toggle wow/mellow (M)"
-				>
-					{lightMode === 'wow' ? 'Mellow' : 'Wow'}
-				</button>
-				<button
-					class="hud-btn"
-					type="button"
-					onclick={() => (showLegend = !showLegend)}
-					title="Toggle legend (L)"
-				>
-					Legend
-				</button>
-				<button
-					class="hud-btn"
-					type="button"
-					onclick={() => (renderMode = renderMode === 'orb' ? 'signal' : 'orb')}
-					title="Toggle render (B)"
-				>
-					{renderMode === 'orb' ? 'Signal' : 'Orb'}
-				</button>
+	<!-- Help modal -->
+	{#if showHelp}
+		<div
+			class="modal-backdrop"
+			onclick={() => (showHelp = false)}
+			onkeydown={(e) => e.key === 'Escape' && (showHelp = false)}
+			role="button"
+			tabindex="0"
+			aria-label="Close help"
+		></div>
+		<dialog class="help-modal" open aria-label="Help">
+			<h2>What is Wyrdness?</h2>
+			<p>
+				Wyrdness visualizes patterns in random data. Two streams of random bits (0s and 1s) are
+				continuously compared, looking for moments when they deviate from pure chance.
+			</p>
+			<p>
+				This is an attempt to copy the <a href="https://gowyrd.org/wyrd-light/">Wyrd Light's</a> behaviour
+				in a form that can be easily shared in a Zoom meeting.
+			</p>
+			<h3>What do the colors mean?</h3>
+			<ul>
+				<li>
+					<strong>Correlated</strong> (cyan/blue) — Both streams trending the same direction, more than
+					expected by chance.
+				</li>
+				<li>
+					<strong>Diverging</strong> (orange/coral) — Streams trending in opposite directions, more than
+					expected by chance.
+				</li>
+				<li>
+					<strong>Agreement</strong> (green) — Individual bits matching more often than expected.
+				</li>
+			</ul>
+
+			<h3>What do the symbols mean?</h3>
+			<ul>
+				<li><strong>↑ / ↓</strong> — Direction of the streams (high/1 or low/0).</li>
+				<li><strong>+ / −</strong> — Pearson correlation direction (positive or negative).</li>
+				<li><strong>A&gt;B or B&gt;A </strong> — Stream A has more 1s than B (or vice versa).</li>
+			</ul>
+
+			<h3>What does brightness mean?</h3>
+			<p>
+				The brighter the orb glows, the more statistically significant the current pattern. When an
+				expanding white ring appears, significance has crossed a threshold.
+			</p>
+
+			<h3>What about the swirling effect?</h3>
+			<p>
+				The swirling motion inside the orb shows correlation between the two streams. It spins
+				clockwise for positive correlation (+) and counter-clockwise for negative (−).
+			</p>
+
+			<h3>Why does this matter?</h3>
+			<p>
+				Some researchers explore whether group intention or focused attention can influence random
+				systems. This is a tool for that exploration — watch for the orb to respond to your group's
+				shared focus.
+			</p>
+
+			<div class="help-footer">
+				<span class="help-hint">Press <kbd>?</kbd> or <kbd>Esc</kbd> to close</span>
 			</div>
-
-			{#if showLegend}
-				<div class="legend">
-					<div class="legend-row">
-						<span class="swatch" style={`--h:${palette.correlated_high.hue}`}></span> Cyan: Both high
-						(1s)
-					</div>
-					<div class="legend-row">
-						<span class="swatch" style={`--h:${palette.correlated_low.hue}`}></span> Blue: Both low (0s)
-					</div>
-					<div class="legend-row">
-						<span class="swatch" style={`--h:${palette.anti_ab.hue}`}></span> Orange: A high, B low
-					</div>
-					<div class="legend-row">
-						<span class="swatch" style={`--h:${palette.anti_ba.hue}`}></span> Coral: B high, A low
-					</div>
-					<div class="legend-row">
-						<span class="swatch" style={`--h:${palette.stick.hue}`}></span> Green: Stick together
-					</div>
-					<div class="legend-row">
-						<span class="swatch" style="--h:0; background: linear-gradient(90deg, #fff, #888, #fff)"
-						></span> Spin: Pearson (+ clockwise, - counter)
-					</div>
-				</div>
-			{/if}
-
-			{#if showSettings}
-				<div class="sep"></div>
-				<div class="controls">
-					<label>
-						<span>Updates/sec</span>
-						<input bind:value={updatesPerSec} type="range" min="1" max="5" step="1" />
-						<span class="mono">{updatesPerSec}</span>
-					</label>
-				</div>
-			{/if}
-
-			<div class="hint mono">
-				H: HUD &nbsp; M: mode &nbsp; 1-5: speed &nbsp; D: demo &nbsp; B: render &nbsp; R: reset
-				&nbsp; F: fullscreen &nbsp; S: settings &nbsp; L: legend
-			</div>
-		</section>
+		</dialog>
 	{/if}
 
 	<!-- Demo mode overlay with big labels -->
 	{#if demoMode}
+		{@const isAnomaly = demoIndex === 5}
 		<div class="demo-overlay">
-			<div class="demo-label-main">{DEMO_LABELS[demoChannel]}</div>
-			<div class="demo-label-pearson">
-				{demoPearsonDir === 1 ? 'Pearson+  (clockwise)' : 'Pearson−  (counter-clockwise)'}
-			</div>
+			<div class="demo-label-main">{isAnomaly ? 'Anomaly' : DEMO_LABELS[demoChannel]}</div>
+			{#if !isAnomaly}
+				<div class="demo-label-pearson">
+					{demoPearsonDir === 1 ? 'Pearson+  (clockwise)' : 'Pearson−  (counter-clockwise)'}
+				</div>
+			{/if}
 			<div class="demo-progress">
-				{demoIndex + 1} / {DEMO_CHANNELS.length}
+				{demoIndex + 1} / 6
 			</div>
 		</div>
 	{/if}
@@ -1695,71 +1651,124 @@
 		display: block;
 	}
 
-	.hud {
+	/* === Bottom Bar === */
+	.bottom-bar {
 		position: fixed;
-		left: 18px;
-		top: 18px;
-		width: min(380px, calc(100vw - 36px));
-		padding: 12px 12px 10px;
-		border-radius: 14px;
-		color: rgba(255, 255, 255, 0.92);
-		background: rgba(10, 10, 16, 0.42);
-		backdrop-filter: blur(10px);
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-		user-select: none;
-	}
-
-	.hud-title {
+		bottom: 0;
+		left: 0;
+		right: 0;
 		display: flex;
-		align-items: baseline;
+		align-items: center;
 		justify-content: space-between;
-		gap: 12px;
-		margin-bottom: 8px;
+		padding: 10px 20px;
+		background: rgba(10, 10, 16, 0.5);
+		backdrop-filter: blur(10px);
+		border-top: 1px solid rgba(255, 255, 255, 0.06);
+		color: rgba(255, 255, 255, 0.85);
+		font-size: 13px;
+		user-select: none;
+		z-index: 50;
 	}
 
-	.hud-actions {
+	.bar-left {
 		display: flex;
-		justify-content: flex-end;
-		gap: 8px;
-		margin: 6px 0 8px;
+		gap: 16px;
+		opacity: 0.6;
+		font-size: 12px;
 	}
 
-	.hud-btn {
-		appearance: none;
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		background: rgba(255, 255, 255, 0.06);
+	.shortcut {
+		white-space: nowrap;
+	}
+
+	.bar-center {
+		position: absolute;
+		left: 50%;
+		transform: translateX(-50%);
+	}
+
+	.state-name {
+		font-size: 16px;
+		font-weight: 500;
+		letter-spacing: 0.02em;
+	}
+
+	.bar-right {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+	}
+
+	.mode-info {
+		font-variant-numeric: tabular-nums;
+		opacity: 0.8;
+	}
+
+	.brand {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 		color: rgba(255, 255, 255, 0.9);
-		border-radius: 10px;
-		padding: 6px 10px;
-		font-size: 12px;
-		cursor: pointer;
+		text-decoration: none;
+		font-weight: 600;
+		letter-spacing: 0.02em;
 	}
 
-	.hud-btn:hover {
-		background: rgba(255, 255, 255, 0.1);
+	.brand:hover {
+		color: white;
 	}
 
-	.legend {
-		margin: 8px 0 4px;
-		padding: 8px 10px;
-		border-radius: 12px;
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		background: rgba(0, 0, 0, 0.18);
+	.github-icon {
+		width: 16px;
+		height: 16px;
+		opacity: 0.7;
+	}
+
+	.brand:hover .github-icon {
+		opacity: 1;
+	}
+
+	/* === Legend Panel (top-right) === */
+	.legend-panel {
+		position: fixed;
+		top: 18px;
+		right: 18px;
+		width: min(340px, calc(100vw - 36px));
+		padding: 14px 16px;
+		border-radius: 14px;
+		color: rgba(255, 255, 255, 0.9);
+		background: rgba(10, 10, 16, 0.65);
+		backdrop-filter: blur(12px);
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
 		font-size: 12px;
-		color: rgba(255, 255, 255, 0.86);
+		z-index: 60;
+	}
+
+	.legend-panel h3 {
+		margin: 0 0 8px;
+		font-size: 11px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		opacity: 0.6;
+	}
+
+	.legend-panel h3:not(:first-child) {
+		margin-top: 14px;
 	}
 
 	.legend-row {
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		padding: 3px 0;
+		padding: 4px 0;
+		line-height: 1.4;
 	}
 
 	.swatch {
-		width: 12px;
-		height: 12px;
+		width: 14px;
+		height: 14px;
 		border-radius: 999px;
 		background: radial-gradient(
 			circle at 30% 30%,
@@ -1770,35 +1779,155 @@
 		flex: 0 0 auto;
 	}
 
-	.hud-name {
-		font-weight: 650;
-		letter-spacing: 0.02em;
-		font-size: 14px;
+	.spin-swatch {
+		background: linear-gradient(90deg, #fff, #888, #fff);
 	}
 
-	.hud-mode {
-		font-variant-numeric: tabular-nums;
+	.indicator {
+		width: 14px;
+		text-align: center;
+		font-weight: 600;
 		opacity: 0.9;
-		font-size: 13px;
+		flex: 0 0 auto;
 	}
 
-	.hud-row {
+	/* === Dev Panel (top-left) === */
+	.dev-panel {
+		position: fixed;
+		top: 18px;
+		left: 18px;
+		width: min(280px, calc(100vw - 36px));
+		padding: 14px 16px;
+		border-radius: 14px;
+		color: rgba(255, 255, 255, 0.9);
+		background: rgba(10, 10, 16, 0.65);
+		backdrop-filter: blur(12px);
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+		font-size: 12px;
+		z-index: 60;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	}
+
+	.dev-panel h3 {
+		margin: 0 0 10px;
+		font-size: 11px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		opacity: 0.6;
+	}
+
+	.dev-row {
 		display: flex;
 		justify-content: space-between;
 		gap: 12px;
 		padding: 2px 0;
-		font-size: 13px;
 	}
 
-	.hud-row.demo {
+	.dev-row .k {
+		opacity: 0.6;
+	}
+
+	.dev-row .v {
+		font-variant-numeric: tabular-nums;
+	}
+
+	.dev-row.demo {
 		color: rgba(255, 200, 100, 0.9);
 	}
 
-	.hud-row.episode {
+	.dev-row.episode {
 		color: rgba(180, 220, 255, 0.9);
 	}
 
-	/* Demo mode overlay */
+	/* === Help Modal === */
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.6);
+		backdrop-filter: blur(4px);
+		z-index: 200;
+	}
+
+	.help-modal {
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: min(600px, calc(100vw - 48px));
+		max-height: calc(100vh - 80px);
+		overflow-y: auto;
+		padding: 28px 32px;
+		border-radius: 18px;
+		background: rgba(18, 18, 26, 0.95);
+		backdrop-filter: blur(20px);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+		color: rgba(255, 255, 255, 0.9);
+		z-index: 210;
+	}
+
+	.help-modal h2 {
+		margin: 0 0 16px;
+		font-size: 24px;
+		font-weight: 600;
+	}
+
+	.help-modal h3 {
+		margin: 20px 0 10px;
+		font-size: 15px;
+		font-weight: 600;
+		opacity: 0.95;
+	}
+
+	.help-modal p {
+		margin: 0 0 12px;
+		line-height: 1.6;
+		font-size: 14px;
+		opacity: 0.85;
+	}
+
+	.help-modal ul {
+		margin: 0 0 12px;
+		padding-left: 20px;
+		line-height: 1.7;
+		font-size: 14px;
+		opacity: 0.85;
+	}
+
+	.help-modal li {
+		margin-bottom: 6px;
+	}
+
+	.help-modal strong {
+		color: white;
+		font-weight: 600;
+	}
+
+	.help-footer {
+		margin-top: 24px;
+		padding-top: 16px;
+		border-top: 1px solid rgba(255, 255, 255, 0.1);
+		text-align: center;
+	}
+
+	.help-hint {
+		font-size: 12px;
+		opacity: 0.5;
+	}
+
+	.help-modal kbd {
+		display: inline-block;
+		padding: 2px 6px;
+		border-radius: 4px;
+		background: rgba(255, 255, 255, 0.1);
+		border: 1px solid rgba(255, 255, 255, 0.15);
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 11px;
+	}
+
+	/* === Demo Mode Overlay === */
 	.demo-overlay {
 		position: fixed;
 		inset: 0;
@@ -1841,47 +1970,20 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.k {
-		opacity: 0.72;
-	}
+	/* === Responsive === */
+	@media (max-width: 640px) {
+		.bar-left {
+			display: none;
+		}
 
-	.v {
-		font-variant-numeric: tabular-nums;
-	}
+		.bottom-bar {
+			justify-content: center;
+			gap: 20px;
+		}
 
-	.sep {
-		height: 1px;
-		background: rgba(255, 255, 255, 0.1);
-		margin: 10px 0;
-	}
-
-	.controls {
-		display: grid;
-		gap: 8px;
-	}
-
-	label {
-		display: grid;
-		grid-template-columns: 90px 1fr auto;
-		align-items: center;
-		gap: 10px;
-		font-size: 12px;
-		color: rgba(255, 255, 255, 0.86);
-	}
-
-	input[type='range'] {
-		width: 100%;
-	}
-
-	.mono {
-		font-family:
-			ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-			monospace;
-	}
-
-	.hint {
-		margin-top: 6px;
-		opacity: 0.65;
-		font-size: 11px;
+		.bar-center {
+			position: static;
+			transform: none;
+		}
 	}
 </style>
