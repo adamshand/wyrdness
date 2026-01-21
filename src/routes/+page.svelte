@@ -124,14 +124,45 @@
 	let pearsonPhase = $state(0);
 	let zAgree = $state(0);
 
+	// === Significance Pulse State ===
+	// Visual indicator when crossing into statistical significance
+	const SIG_PULSE_THRESHOLD = 0.35; // sigEnergy level to trigger pulse
+	const SIG_PULSE_DURATION = 800; // ms for ring to expand
+	const SIG_PULSE_COOLDOWN = 2500; // minimum ms between pulses
+	let sigPulseStart = $state(0); // timestamp when pulse started (0 = no active pulse)
+	let sigWasAboveThreshold = $state(false); // for detecting upward crossing
+	let sigPulseLastTime = 0; // last time a pulse was triggered (for cooldown)
+
 	let dominant = $state<Channel>('baseline');
 	let dominance = $state(0);
 
 	let fps = $state(0);
 
-	// === Cheat / Debug ===
-	let cheatBoost = $state(0); // injected fake coherence (0..1), decays slowly
-	let cheatChannel = $state<Exclude<Channel, 'baseline'>>('correlated_high'); // which channel the cheat "looks like"
+	// === Demo Mode ===
+	// Auto-cycling showcase of all channels with Pearson spin
+	const DEMO_CHANNELS: Exclude<Channel, 'baseline'>[] = [
+		'correlated_high',
+		'correlated_low',
+		'anti_ab',
+		'anti_ba',
+		'stick'
+	];
+	const DEMO_LABELS: Record<Exclude<Channel, 'baseline'>, string> = {
+		correlated_high: 'Both streams HIGH',
+		correlated_low: 'Both streams LOW',
+		anti_ab: 'A high, B low',
+		anti_ba: 'B high, A low',
+		stick: 'Bits matching'
+	};
+	const DEMO_DURATION_MS = 3000; // 3 seconds per channel
+
+	let demoMode = $state(false); // whether auto-cycling is active
+	let demoBoost = $state(0); // injected fake coherence (0..1)
+	let demoChannel = $state<Exclude<Channel, 'baseline'>>('correlated_high');
+	let demoIndex = $state(0); // which channel in the sequence (0-4)
+	let demoPearsonDir = $state<1 | -1>(1); // alternates each channel
+	let demoStartTime = $state(0); // timestamp when current channel started
+	let demoPearsonBoost = $state(0); // injected Pearson value for spin effect
 
 	// === History for strip chart (last 180 seconds at 1Hz) ===
 	const HISTORY_LEN = 180;
@@ -410,7 +441,10 @@
 		dominance = 0;
 		hueSmooth = 205;
 
-		cheatBoost = 0;
+		demoBoost = 0;
+		demoMode = false;
+		demoIndex = 0;
+		demoPearsonBoost = 0;
 		bootMs = 0;
 
 		// Reset cumulative deviation state
@@ -433,6 +467,11 @@
 		historyCoherence = [];
 		historyDominant = [];
 		historyPearson = [];
+
+		// Reset significance pulse state
+		sigPulseStart = 0;
+		sigWasAboveThreshold = false;
+		sigPulseLastTime = 0;
 	}
 
 	function recomputeAggregatesFromBuffers() {
@@ -662,15 +701,15 @@
 		zAgree = zAgree + (stickZ - zAgree) * k;
 		pearsonR = pearsonR + (pearsonR_seg - pearsonR) * k;
 
-		// Build raw channel strengths with cheat boost applied
+		// Build raw channel strengths with demo boost applied
 		const raw: Record<Exclude<Channel, 'baseline'>, number> = {
 			correlated_high:
-				cheatChannel === 'correlated_high' ? Math.min(1, corrHighRaw + cheatBoost) : corrHighRaw,
+				demoChannel === 'correlated_high' ? Math.min(1, corrHighRaw + demoBoost) : corrHighRaw,
 			correlated_low:
-				cheatChannel === 'correlated_low' ? Math.min(1, corrLowRaw + cheatBoost) : corrLowRaw,
-			anti_ab: cheatChannel === 'anti_ab' ? Math.min(1, antiAbRaw + cheatBoost) : antiAbRaw,
-			anti_ba: cheatChannel === 'anti_ba' ? Math.min(1, antiBaRaw + cheatBoost) : antiBaRaw,
-			stick: cheatChannel === 'stick' ? Math.min(1, stickRaw + cheatBoost) : stickRaw
+				demoChannel === 'correlated_low' ? Math.min(1, corrLowRaw + demoBoost) : corrLowRaw,
+			anti_ab: demoChannel === 'anti_ab' ? Math.min(1, antiAbRaw + demoBoost) : antiAbRaw,
+			anti_ba: demoChannel === 'anti_ba' ? Math.min(1, antiBaRaw + demoBoost) : antiBaRaw,
+			stick: demoChannel === 'stick' ? Math.min(1, stickRaw + demoBoost) : stickRaw
 		};
 		rawLast = raw;
 
@@ -685,9 +724,11 @@
 			raw.stick
 		);
 
-		// Decay cheat boost slowly
-		cheatBoost *= 0.97;
-		if (cheatBoost < 0.01) cheatBoost = 0;
+		// Decay demo boost slowly (only when not in active demo mode)
+		if (!demoMode) {
+			demoBoost *= 0.97;
+			if (demoBoost < 0.01) demoBoost = 0;
+		}
 
 		// Significance energy (p-value based)
 		const dtMs = 1000 / Math.max(0.25, updatesPerSec);
@@ -708,7 +749,7 @@
 			pPearson
 		);
 		const pOverall =
-			cheatBoost > 0.05 ? Math.min(pOverallReal, 0.001 * (1 - cheatBoost)) : pOverallReal;
+			demoBoost > 0.05 ? Math.min(pOverallReal, 0.001 * (1 - demoBoost)) : pOverallReal;
 		const surprisal = Math.min(6, -Math.log10(pOverall));
 		const targetSig = clamp01((surprisal - 0.8) / 4.8);
 
@@ -747,13 +788,61 @@
 			rawRender = { correlated_high: 0, correlated_low: 0, anti_ab: 0, anti_ba: 0, stick: 0 };
 		}
 
+		// === Demo Mode Sequencing ===
+		if (demoMode) {
+			const now = performance.now();
+			const elapsed = now - demoStartTime;
+
+			// Smooth envelope: sin²(π * t) peaks at middle, smooth start/end
+			const t = Math.min(1, elapsed / DEMO_DURATION_MS);
+			const envelope = Math.pow(Math.sin(Math.PI * t), 2);
+			const prevEnvelope = demoBoost / 0.85; // Previous envelope value
+			demoBoost = 0.85 * envelope;
+			demoPearsonBoost = 0.35 * demoPearsonDir * envelope;
+
+			// Trigger significance pulse when envelope crosses 0.5 on the way up
+			// This shows the expanding ring effect during each channel's demo
+			if (envelope >= 0.5 && prevEnvelope < 0.5) {
+				sigPulseStart = now;
+			}
+
+			// Force sigEnergy high during demo so core is visible
+			sigEnergyRender = envelope * 0.7;
+
+			// Force dominant channel during demo (bypass normal selection)
+			dominant = demoChannel;
+			dominance = envelope;
+
+			if (elapsed >= DEMO_DURATION_MS) {
+				// Move to next channel
+				demoIndex++;
+				if (demoIndex >= DEMO_CHANNELS.length) {
+					// Demo complete
+					demoMode = false;
+					demoBoost = 0;
+					demoPearsonBoost = 0;
+					// Reset to baseline after demo
+					dominant = 'baseline';
+					dominance = 0;
+				} else {
+					// Advance to next channel
+					demoChannel = DEMO_CHANNELS[demoIndex];
+					demoPearsonDir = demoPearsonDir === 1 ? -1 : 1; // Alternate direction
+					demoStartTime = now;
+				}
+			}
+		}
+
 		// Pearson motion - drives the swirling disc effect
 		// Still when |r| < threshold, spins when significant
 		{
 			const dt = dtMs / 1000;
 			const spinTau = 900;
 			const sk = 1 - Math.exp(-dtMs / spinTau);
-			pearsonSpin = pearsonSpin + (pearsonR - pearsonSpin) * sk;
+
+			// Use demo Pearson boost if in demo mode, otherwise use real pearsonR
+			const effectivePearson = demoMode ? demoPearsonBoost : pearsonR;
+			pearsonSpin = pearsonSpin + (effectivePearson - pearsonSpin) * sk;
 
 			if (!bootLock) {
 				// Direction based on sign of pearson
@@ -799,6 +888,26 @@
 			sigEnergyRender = sigEnergyRender + (sigEnergy - sigEnergyRender) * k;
 		}
 
+		// Detect significance threshold crossing and trigger pulse
+		{
+			const now = performance.now();
+			const isAbove = sigEnergyRender >= SIG_PULSE_THRESHOLD;
+			const cooledDown = now - sigPulseLastTime >= SIG_PULSE_COOLDOWN;
+
+			// Trigger pulse on upward crossing (was below, now above) with cooldown
+			if (isAbove && !sigWasAboveThreshold && cooledDown && !bootLock) {
+				sigPulseStart = now;
+				sigPulseLastTime = now;
+			}
+
+			sigWasAboveThreshold = isAbove;
+
+			// Clear pulse after duration
+			if (sigPulseStart > 0 && now - sigPulseStart >= SIG_PULSE_DURATION) {
+				sigPulseStart = 0;
+			}
+		}
+
 		// Baseline hue wandering
 		if (dominant === 'baseline') {
 			const nowMs = performance.now();
@@ -814,9 +923,10 @@
 			}
 		}
 
-		// Hue smoothing - uses mode preset
+		// Hue smoothing - uses mode preset, faster during demo
 		const baseHue = dominant === 'baseline' ? baselineHueTarget : palette[dominant].hue;
-		const hueTau = dominant === 'baseline' ? 14000 : preset.hueTauMs;
+		// Use much faster hue transition during demo mode for snappy color changes
+		const hueTau = demoMode ? 400 : dominant === 'baseline' ? 14000 : preset.hueTauMs;
 		const hk = 1 - Math.exp(-dtMs / hueTau);
 		hueSmooth = hueApproach(hueSmooth, baseHue, hk);
 
@@ -1091,24 +1201,68 @@
 			ctx.filter = 'none';
 		}
 
-		// Significance core
+		// Significance core - enhanced when above threshold
 		if (!bootLock && sigEnergyRender > 0.001) {
 			const s = Math.pow(sigEnergyRender, 0.85);
-			const coreR = r * (0.06 + 0.34 * s);
-			const coreBlur = Math.max(10, 24 - 10 * s + 8 * brightness);
+			// Larger core when above threshold
+			const isSignificant = sigEnergyRender >= SIG_PULSE_THRESHOLD;
+			const coreR = r * (0.08 + (isSignificant ? 0.45 : 0.32) * s);
+			const coreBlur = Math.max(8, 20 - 8 * s + 6 * brightness);
 
 			ctx.save();
 			ctx.globalCompositeOperation = 'screen';
-			ctx.globalAlpha = (0.06 + 0.38 * s) * (0.75 + 0.25 * brightness);
+			// More prominent alpha when significant
+			const baseAlpha = isSignificant ? 0.12 + 0.55 * s : 0.06 + 0.38 * s;
+			ctx.globalAlpha = baseAlpha * (0.75 + 0.25 * brightness);
 			ctx.filter = `blur(${coreBlur}px)`;
 
 			const cg = ctx.createRadialGradient(cx, cy, coreR * 0.05, cx, cy, coreR);
-			cg.addColorStop(0, 'rgba(255, 245, 232, 0.95)');
-			cg.addColorStop(0.22, 'rgba(255, 238, 218, 0.65)');
-			cg.addColorStop(0.55, 'rgba(220, 240, 255, 0.22)');
-			cg.addColorStop(1, 'rgba(255, 255, 255, 0)');
+			// Brighter, warmer core when significant
+			if (isSignificant) {
+				cg.addColorStop(0, 'rgba(255, 252, 245, 1.0)');
+				cg.addColorStop(0.18, 'rgba(255, 248, 235, 0.85)');
+				cg.addColorStop(0.45, 'rgba(255, 245, 230, 0.45)');
+				cg.addColorStop(0.75, 'rgba(240, 248, 255, 0.15)');
+				cg.addColorStop(1, 'rgba(255, 255, 255, 0)');
+			} else {
+				cg.addColorStop(0, 'rgba(255, 245, 232, 0.95)');
+				cg.addColorStop(0.22, 'rgba(255, 238, 218, 0.65)');
+				cg.addColorStop(0.55, 'rgba(220, 240, 255, 0.22)');
+				cg.addColorStop(1, 'rgba(255, 255, 255, 0)');
+			}
 			ctx.fillStyle = cg;
 			ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+			ctx.restore();
+		}
+
+		// Significance pulse - expanding ring on threshold crossing
+		if (sigPulseStart > 0) {
+			const now = performance.now();
+			const elapsed = now - sigPulseStart;
+			const t = Math.min(1, elapsed / SIG_PULSE_DURATION);
+
+			// Ease out for smooth deceleration
+			const easeOut = 1 - Math.pow(1 - t, 2);
+
+			// Ring expands from center to edge
+			const ringRadius = r * (0.1 + 0.9 * easeOut);
+			const ringWidth = r * 0.12 * (1 - t * 0.5); // Thins slightly as it expands
+
+			// Fade out as it expands
+			const ringAlpha = (1 - t) * 0.7;
+
+			ctx.save();
+			ctx.globalCompositeOperation = 'screen';
+			ctx.globalAlpha = ringAlpha;
+			ctx.filter = `blur(${8 + 12 * t}px)`; // Gets softer as it expands
+
+			// Draw ring as a stroked arc
+			ctx.beginPath();
+			ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+			ctx.strokeStyle = 'rgba(255, 252, 245, 0.9)';
+			ctx.lineWidth = ringWidth;
+			ctx.stroke();
 
 			ctx.restore();
 		}
@@ -1310,13 +1464,33 @@
 			responseSpeed = parseInt(e.key) as 1 | 2 | 3 | 4 | 5;
 			return;
 		}
-		// C = cheat: inject fake coherence spike
-		if (e.key === 'c' || e.key === 'C') {
-			cheatBoost = Math.min(1, cheatBoost + 0.6);
+		// D = toggle demo mode (auto-cycling showcase)
+		if (e.key === 'd' || e.key === 'D') {
+			if (demoMode) {
+				// Stop demo
+				demoMode = false;
+				demoBoost = 0;
+				demoPearsonBoost = 0;
+			} else {
+				// Start demo - envelope will calculate boost values each frame
+				demoMode = true;
+				demoIndex = 0;
+				demoChannel = DEMO_CHANNELS[0];
+				demoPearsonDir = 1;
+				demoBoost = 0;
+				demoPearsonBoost = 0;
+				demoStartTime = performance.now();
+			}
 			return;
 		}
-		if (e.key === 'Escape' && showSettings) {
-			showSettings = false;
+		if (e.key === 'Escape') {
+			if (demoMode) {
+				demoMode = false;
+				demoBoost = 0;
+				demoPearsonBoost = 0;
+			} else if (showSettings) {
+				showSettings = false;
+			}
 		}
 	}
 
@@ -1416,10 +1590,10 @@
 				</div>
 			{/if}
 
-			{#if cheatBoost > 0.01}
-				<div class="hud-row cheat">
-					<span class="k">Cheat Boost</span>
-					<span class="v">{(cheatBoost * 100).toFixed(0)}%</span>
+			{#if demoBoost > 0.01 && !demoMode}
+				<div class="hud-row demo">
+					<span class="k">Demo Boost</span>
+					<span class="v">{(demoBoost * 100).toFixed(0)}%</span>
 				</div>
 			{/if}
 
@@ -1487,10 +1661,23 @@
 			{/if}
 
 			<div class="hint mono">
-				H: HUD &nbsp; M: mode &nbsp; 1-5: speed &nbsp; B: render &nbsp; C: cheat &nbsp; R: reset
+				H: HUD &nbsp; M: mode &nbsp; 1-5: speed &nbsp; D: demo &nbsp; B: render &nbsp; R: reset
 				&nbsp; F: fullscreen &nbsp; S: settings &nbsp; L: legend
 			</div>
 		</section>
+	{/if}
+
+	<!-- Demo mode overlay with big labels -->
+	{#if demoMode}
+		<div class="demo-overlay">
+			<div class="demo-label-main">{DEMO_LABELS[demoChannel]}</div>
+			<div class="demo-label-pearson">
+				{demoPearsonDir === 1 ? 'Pearson+  (clockwise)' : 'Pearson−  (counter-clockwise)'}
+			</div>
+			<div class="demo-progress">
+				{demoIndex + 1} / {DEMO_CHANNELS.length}
+			</div>
+		</div>
 	{/if}
 </main>
 
@@ -1603,12 +1790,55 @@
 		font-size: 13px;
 	}
 
-	.hud-row.cheat {
+	.hud-row.demo {
 		color: rgba(255, 200, 100, 0.9);
 	}
 
 	.hud-row.episode {
 		color: rgba(180, 220, 255, 0.9);
+	}
+
+	/* Demo mode overlay */
+	.demo-overlay {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		pointer-events: none;
+		z-index: 100;
+	}
+
+	.demo-label-main {
+		font-size: clamp(2rem, 8vw, 5rem);
+		font-weight: 700;
+		color: rgba(255, 255, 255, 0.95);
+		text-shadow:
+			0 0 40px rgba(0, 0, 0, 0.8),
+			0 0 80px rgba(0, 0, 0, 0.6),
+			0 4px 20px rgba(0, 0, 0, 0.9);
+		text-align: center;
+		padding: 0 1rem;
+	}
+
+	.demo-label-pearson {
+		font-size: clamp(1rem, 4vw, 2rem);
+		font-weight: 400;
+		color: rgba(255, 255, 255, 0.75);
+		text-shadow:
+			0 0 30px rgba(0, 0, 0, 0.8),
+			0 2px 10px rgba(0, 0, 0, 0.9);
+		margin-top: 0.5rem;
+		text-align: center;
+	}
+
+	.demo-progress {
+		font-size: clamp(0.8rem, 2vw, 1.2rem);
+		font-weight: 400;
+		color: rgba(255, 255, 255, 0.5);
+		margin-top: 1.5rem;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.k {
