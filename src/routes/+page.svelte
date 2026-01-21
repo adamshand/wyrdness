@@ -7,7 +7,8 @@
 		| 'correlated_low'
 		| 'anti_ab'
 		| 'anti_ba'
-		| 'stick';
+		| 'stick'
+		| 'pearson';
 
 	type LightMode = 'wow' | 'mellow';
 
@@ -113,8 +114,6 @@
 
 	let hueSmooth = $state(205);
 	let satSmooth = $state(58);
-	let baselineHueTarget = $state(205);
-	let baselineHueNextAtMs = 0;
 
 	let zA = $state(0);
 	let zB = $state(0);
@@ -145,14 +144,16 @@
 		'correlated_low',
 		'anti_ab',
 		'anti_ba',
-		'stick'
+		'stick',
+		'pearson'
 	];
 	const DEMO_LABELS: Record<Exclude<Channel, 'baseline'>, string> = {
 		correlated_high: 'Correlated ↑',
 		correlated_low: 'Correlated ↓',
 		anti_ab: 'Diverging A>B',
 		anti_ba: 'Diverging B>A',
-		stick: 'Agreement'
+		stick: 'Agreement',
+		pearson: 'Pearson'
 	};
 	const DEMO_DURATION_MS = 5000; // 5 seconds per channel
 
@@ -201,7 +202,8 @@
 		correlated_low: defaultEpisode(),
 		anti_ab: defaultEpisode(),
 		anti_ba: defaultEpisode(),
-		stick: defaultEpisode()
+		stick: defaultEpisode(),
+		pearson: defaultEpisode()
 	});
 
 	let rawLast: Record<Exclude<Channel, 'baseline'>, number> = {
@@ -209,14 +211,16 @@
 		correlated_low: 0,
 		anti_ab: 0,
 		anti_ba: 0,
-		stick: 0
+		stick: 0,
+		pearson: 0
 	};
 	let rawRender: Record<Exclude<Channel, 'baseline'>, number> = {
 		correlated_high: 0,
 		correlated_low: 0,
 		anti_ab: 0,
 		anti_ba: 0,
-		stick: 0
+		stick: 0,
+		pearson: 0
 	};
 
 	// Render-smoothed version (updated every frame, not just on ticks)
@@ -228,11 +232,12 @@
 
 	// Channel colors: light/dark pairs for directional channels
 	const palette: Record<Exclude<Channel, 'baseline'>, { hue: number; name: string }> = {
-		correlated_high: { hue: 180, name: 'Corr +' }, // Light teal/cyan (both toward 1s)
-		correlated_low: { hue: 210, name: 'Corr -' }, // Dark teal/blue (both toward 0s)
-		anti_ab: { hue: 35, name: 'Anti A>B' }, // Orange/amber (A high, B low)
-		anti_ba: { hue: 8, name: 'Anti B>A' }, // Coral/red (B high, A low)
-		stick: { hue: 112, name: 'Stick' } // Green (agreement)
+		correlated_high: { hue: 170, name: 'Corr +' }, // Teal/cyan (both toward 1s)
+		correlated_low: { hue: 238, name: 'Corr -' }, // Deep indigo/blue (both toward 0s)
+		anti_ab: { hue: 50, name: 'Anti A>B' }, // Golden orange (A high, B low)
+		anti_ba: { hue: 350, name: 'Anti B>A' }, // Crimson rose (B high, A low)
+		stick: { hue: 112, name: 'Stick' }, // Green (agreement)
+		pearson: { hue: 252, name: 'Pearson' } // Violet (rendered pearly when dominant)
 	};
 
 	// User-friendly display names for the bottom bar
@@ -242,7 +247,8 @@
 		correlated_low: 'Correlated',
 		anti_ab: 'Diverging A>B',
 		anti_ba: 'Diverging B>A',
-		stick: 'Agreement'
+		stick: 'Agreement',
+		pearson: 'Pearson'
 	};
 
 	// Get arrow indicator for high/low channels
@@ -478,7 +484,8 @@
 			correlated_low: defaultEpisode(),
 			anti_ab: defaultEpisode(),
 			anti_ba: defaultEpisode(),
-			stick: defaultEpisode()
+			stick: defaultEpisode(),
+			pearson: defaultEpisode()
 		};
 
 		// Reset significance pulse state
@@ -704,6 +711,7 @@
 		updateEpisode('anti_ab', antiAbZ, antiStart);
 		updateEpisode('anti_ba', antiBaZ, antiStart);
 		updateEpisode('stick', stickZ, stickStart);
+		updateEpisode('pearson', pearsonZ_seg, spPearson.startIdx);
 
 		// === Smooth stats for HUD ===
 		const statsTau = 2800;
@@ -714,6 +722,11 @@
 		zAgree = zAgree + (stickZ - zAgree) * k;
 		pearsonR = pearsonR + (pearsonR_seg - pearsonR) * k;
 
+		// Pearson channel strength (0..1) derived from |r|
+		const pearsonRaw = clamp01(
+			(Math.abs(pearsonR_seg) - PEARSON_R_START) / (PEARSON_R_FULL - PEARSON_R_START)
+		);
+
 		// Build raw channel strengths with demo boost applied
 		const raw: Record<Exclude<Channel, 'baseline'>, number> = {
 			correlated_high:
@@ -722,7 +735,8 @@
 				demoChannel === 'correlated_low' ? Math.min(1, corrLowRaw + demoBoost) : corrLowRaw,
 			anti_ab: demoChannel === 'anti_ab' ? Math.min(1, antiAbRaw + demoBoost) : antiAbRaw,
 			anti_ba: demoChannel === 'anti_ba' ? Math.min(1, antiBaRaw + demoBoost) : antiBaRaw,
-			stick: demoChannel === 'stick' ? Math.min(1, stickRaw + demoBoost) : stickRaw
+			stick: demoChannel === 'stick' ? Math.min(1, stickRaw + demoBoost) : stickRaw,
+			pearson: demoChannel === 'pearson' ? Math.min(1, pearsonRaw + demoBoost) : pearsonRaw
 		};
 		rawLast = raw;
 
@@ -734,7 +748,8 @@
 			raw.correlated_low,
 			raw.anti_ab,
 			raw.anti_ba,
-			raw.stick
+			raw.stick,
+			raw.pearson
 		);
 
 		// Decay demo boost slowly (only when not in active demo mode)
@@ -792,14 +807,28 @@
 			dominance = 0;
 			coherence = 0;
 			sigEnergy = 0;
-			rawLast = { correlated_high: 0, correlated_low: 0, anti_ab: 0, anti_ba: 0, stick: 0 };
-			rawRender = { correlated_high: 0, correlated_low: 0, anti_ab: 0, anti_ba: 0, stick: 0 };
+			rawLast = {
+				correlated_high: 0,
+				correlated_low: 0,
+				anti_ab: 0,
+				anti_ba: 0,
+				stick: 0,
+				pearson: 0
+			};
+			rawRender = {
+				correlated_high: 0,
+				correlated_low: 0,
+				anti_ab: 0,
+				anti_ba: 0,
+				stick: 0,
+				pearson: 0
+			};
 		}
 
 		// === Demo Mode Sequencing ===
-		// 6 segments: 5 channels + 1 anomaly segment at the end
-		const DEMO_TOTAL_SEGMENTS = 6;
-		const isAnomalySegment = demoIndex === DEMO_CHANNELS.length; // index 5
+		// Segments: all channels + 1 anomaly segment at the end
+		const DEMO_TOTAL_SEGMENTS = DEMO_CHANNELS.length + 1;
+		const isAnomalySegment = demoIndex === DEMO_CHANNELS.length;
 
 		if (demoMode) {
 			const now = performance.now();
@@ -900,7 +929,8 @@
 				'correlated_low',
 				'anti_ab',
 				'anti_ba',
-				'stick'
+				'stick',
+				'pearson'
 			] as const) {
 				const target = rawLast[ch];
 				const current = rawRender[ch];
@@ -945,30 +975,15 @@
 			}
 		}
 
-		// Baseline hue wandering
-		if (dominant === 'baseline') {
-			const nowMs = performance.now();
-			if (baselineHueNextAtMs === 0) {
-				baselineHueTarget = 205;
-				baselineHueNextAtMs = nowMs + 15000;
-			}
-			if (nowMs >= baselineHueNextAtMs) {
-				// Pick from channel hues for wandering
-				const picks = [180, 210, 35, 8, 112, 205];
-				baselineHueTarget = picks[Math.floor(Math.random() * picks.length)];
-				baselineHueNextAtMs = nowMs + 12000 + Math.random() * 22000;
-			}
-		}
-
 		// Hue smoothing - uses mode preset, faster during demo
-		const baseHue = dominant === 'baseline' ? baselineHueTarget : palette[dominant].hue;
+		const baseHue = dominant === 'baseline' ? 35 : palette[dominant].hue;
 		// Use much faster hue transition during demo mode for snappy color changes
 		const hueTau = demoMode ? 400 : dominant === 'baseline' ? 14000 : preset.hueTauMs;
 		const hk = 1 - Math.exp(-dtMs / hueTau);
 		hueSmooth = hueApproach(hueSmooth, baseHue, hk);
 
 		// Saturation smoothing
-		const baseSat = dominant === 'baseline' ? 52 : 80;
+		const baseSat = dominant === 'baseline' ? 10 : dominant === 'pearson' ? 40 : 80;
 		const satTarget = baseSat + preset.saturationBoost;
 		const sk = 1 - Math.exp(-dtMs / preset.satTauMs);
 		satSmooth = satSmooth + (satTarget - satSmooth) * sk;
@@ -1026,6 +1041,9 @@
 		let hue = hueSmooth;
 		let sat = satSmooth;
 
+		const isBaseline = dominant === 'baseline';
+		const baselineLight = isBaseline ? 6 * Math.sin(t * 0.085) : 0;
+
 		const polarity = Math.max(-1, Math.min(1, (zA + zB) / 6));
 		hue = (hue + polarity * 10 + 6 * Math.sin(t * 0.08) + 3 * Math.sin(t * 0.13 + 1.7)) % 360;
 
@@ -1058,15 +1076,15 @@
 			const g = ctx.createRadialGradient(cx + ox, cy + oy, r * 0.1, cx, cy, r);
 			g.addColorStop(
 				0,
-				`hsla(${hue} ${sat}% ${Math.round(56 - 10 * whiten)}% / ${0.95 * orbAlpha})`
+				`hsla(${hue} ${sat}% ${Math.round(56 - 10 * whiten + baselineLight)}% / ${0.95 * orbAlpha})`
 			);
 			g.addColorStop(
 				0.55,
-				`hsla(${hue} ${sat}% ${Math.round(44 - 12 * whiten)}% / ${0.55 * orbAlpha})`
+				`hsla(${hue} ${sat}% ${Math.round(44 - 12 * whiten + baselineLight)}% / ${0.55 * orbAlpha})`
 			);
 			g.addColorStop(
 				1,
-				`hsla(${hue} ${Math.round(sat * 0.7)}% ${Math.round(22 - 10 * whiten)}% / ${0.12 * orbAlpha})`
+				`hsla(${hue} ${Math.round(sat * 0.7)}% ${Math.round(22 - 10 * whiten + baselineLight * 0.65)}% / ${0.12 * orbAlpha})`
 			);
 			ctx.fillStyle = g;
 			ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
@@ -1081,15 +1099,15 @@
 			const hue3 = (hue - 24 + 18 * Math.sin(t * 0.09 + 1.1)) % 360;
 			g2.addColorStop(
 				0,
-				`hsla(${hue2} ${Math.round(sat * 0.9)}% ${Math.round(55 - 8 * whiten)}% / ${0.22 * orbAlpha})`
+				`hsla(${hue2} ${Math.round(sat * 0.9)}% ${Math.round(55 - 8 * whiten + baselineLight * 0.6)}% / ${0.22 * orbAlpha})`
 			);
 			g2.addColorStop(
 				0.55,
-				`hsla(${hue3} ${Math.round(sat * 0.75)}% ${Math.round(48 - 10 * whiten)}% / ${0.18 * orbAlpha})`
+				`hsla(${hue3} ${Math.round(sat * 0.75)}% ${Math.round(48 - 10 * whiten + baselineLight * 0.55)}% / ${0.18 * orbAlpha})`
 			);
 			g2.addColorStop(
 				1,
-				`hsla(${hue2} ${Math.round(sat * 0.7)}% ${Math.round(46 - 10 * whiten)}% / ${0.12 * orbAlpha})`
+				`hsla(${hue2} ${Math.round(sat * 0.7)}% ${Math.round(46 - 10 * whiten + baselineLight * 0.45)}% / ${0.12 * orbAlpha})`
 			);
 			ctx.fillStyle = g2;
 			ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
@@ -1435,6 +1453,7 @@
 			<span class="shortcut">1-5 speed</span>
 			<span class="shortcut">D demo</span>
 			<span class="shortcut">L legend</span>
+			<span class="shortcut">` debug</span>
 		</div>
 		<div class="bar-center">
 			<span class="state-name"
@@ -1462,40 +1481,31 @@
 			<h3>Color Legend</h3>
 			<div class="legend-row">
 				<span class="swatch" style={`--h:${palette.correlated_high.hue}`}></span>
-				<span>Correlated ↑ — both streams high (more than expected)</span>
+				<span>Correlated ↑ — both streams have more 1s than expected</span>
 			</div>
 			<div class="legend-row">
 				<span class="swatch" style={`--h:${palette.correlated_low.hue}`}></span>
-				<span>Correlated ↓ — both streams low (more than expected)</span>
+				<span>Correlated ↓ — both streams have more 0s than expected</span>
 			</div>
 			<div class="legend-row">
 				<span class="swatch" style={`--h:${palette.anti_ab.hue}`}></span>
-				<span>Diverging A>B — Stream A high, Stream B low</span>
+				<span>Diverging A>B — stream A has more 1s and stream B more 0s than expected</span>
 			</div>
 			<div class="legend-row">
 				<span class="swatch" style={`--h:${palette.anti_ba.hue}`}></span>
-				<span>Diverging B>A — Stream B high, Stream A low</span>
+				<span>Diverging B>A — stream B has more 1s and stream A more 0s than expected</span>
 			</div>
 			<div class="legend-row">
 				<span class="swatch" style={`--h:${palette.stick.hue}`}></span>
-				<span>Agreement — bits matching more than expected</span>
+				<span>Agreement — streams are matching more than expected</span>
 			</div>
 			<div class="legend-row">
-				<span class="swatch spin-swatch"></span>
-				<span>Swirl + / − — correlation direction (clockwise/counter)</span>
-			</div>
-			<h3>Indicators</h3>
-			<div class="legend-row">
-				<span class="indicator">↑ ↓</span>
-				<span>Stream direction (high/low)</span>
+				<span class="swatch" style={`--h:${palette.pearson.hue}`}></span>
+				<span>Pearson — streams trend together (not matching but moving in sync)</span>
 			</div>
 			<div class="legend-row">
 				<span class="indicator">+ −</span>
-				<span>Pearson correlation (positive/negative)</span>
-			</div>
-			<div class="legend-row">
-				<span class="indicator">◯</span>
-				<span>Expanding ring — statistical significance threshold crossed</span>
+				<span>Swirl direction (clockwise/counter)</span>
 			</div>
 		</aside>
 	{/if}
@@ -1586,13 +1596,16 @@
 				<li>
 					<strong>Agreement</strong> (green) — Individual bits matching more often than expected.
 				</li>
+				<li>
+					<strong>Pearson</strong> (purple) — Correlation is the dominant pattern.
+				</li>
 			</ul>
 
 			<h3>What do the symbols mean?</h3>
 			<ul>
-				<li><strong>↑ / ↓</strong> — Direction of the streams (high/1 or low/0).</li>
+				<li><strong>↑ / ↓</strong> — Direction of the streams (more 1s or more 0s).</li>
 				<li><strong>+ / −</strong> — Pearson correlation direction (positive or negative).</li>
-				<li><strong>A&gt;B or B&gt;A </strong> — Stream A has more 1s than B (or vice versa).</li>
+				<li><strong>A&gt;B or B&gt;A</strong> — One stream has more 1s than the other.</li>
 			</ul>
 
 			<h3>What does brightness mean?</h3>
@@ -1622,7 +1635,7 @@
 
 	<!-- Demo mode overlay with big labels -->
 	{#if demoMode}
-		{@const isAnomaly = demoIndex === 5}
+		{@const isAnomaly = demoIndex === DEMO_CHANNELS.length}
 		<div class="demo-overlay">
 			<div class="demo-label-main">{isAnomaly ? 'Anomaly' : DEMO_LABELS[demoChannel]}</div>
 			{#if !isAnomaly}
@@ -1631,7 +1644,7 @@
 				</div>
 			{/if}
 			<div class="demo-progress">
-				{demoIndex + 1} / 6
+				{demoIndex + 1} / {DEMO_CHANNELS.length + 1}
 			</div>
 		</div>
 	{/if}
@@ -1777,10 +1790,6 @@
 		);
 		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
 		flex: 0 0 auto;
-	}
-
-	.spin-swatch {
-		background: linear-gradient(90deg, #fff, #888, #fff);
 	}
 
 	.indicator {
