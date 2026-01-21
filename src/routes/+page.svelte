@@ -1,8 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	type Stage = 1 | 2 | 3;
-	type Channel = 'baseline' | 'correlated' | 'anti' | 'stick' | 'pearson';
+	type Channel =
+		| 'baseline'
+		| 'correlated_high'
+		| 'correlated_low'
+		| 'anti_ab'
+		| 'anti_ba'
+		| 'stick';
 	type RenderMode = 'orb' | 'signal';
 	type LightMode = 'wow' | 'mellow';
 
@@ -11,8 +16,6 @@
 	// plus 5 response speed settings. We combine these into mode presets.
 	type ModePreset = {
 		// Smoothing time constants (ms)
-		stageEnergyRiseMs: number;
-		stageEnergyFallMs: number;
 		sigEnergyRiseMs: number;
 		sigEnergyFallMs: number;
 		hueTauMs: number;
@@ -28,8 +31,6 @@
 	const MODE_PRESETS: Record<LightMode, ModePreset> = {
 		wow: {
 			// Faster response, more dramatic
-			stageEnergyRiseMs: 1800,
-			stageEnergyFallMs: 3000,
 			sigEnergyRiseMs: 1000,
 			sigEnergyFallMs: 2000,
 			hueTauMs: 6000,
@@ -41,8 +42,6 @@
 		},
 		mellow: {
 			// Slower, softer, more stable for meetings
-			stageEnergyRiseMs: 3400,
-			stageEnergyFallMs: 5500,
 			sigEnergyRiseMs: 2000,
 			sigEnergyFallMs: 3600,
 			hueTauMs: 14000,
@@ -78,8 +77,6 @@
 	const speedMult = $derived(SPEED_MULTIPLIERS[responseSpeed]);
 	const preset = $derived({
 		...basePreset,
-		stageEnergyRiseMs: basePreset.stageEnergyRiseMs * speedMult,
-		stageEnergyFallMs: basePreset.stageEnergyFallMs * speedMult,
 		sigEnergyRiseMs: basePreset.sigEnergyRiseMs * speedMult,
 		sigEnergyFallMs: basePreset.sigEnergyFallMs * speedMult,
 		hueTauMs: basePreset.hueTauMs * speedMult,
@@ -111,8 +108,6 @@
 	const EPISODE_Z_THRESHOLD = 1.6;
 
 	// === Signal State ===
-	let stage = $state<Stage>(1);
-	let stageEnergy = $state(0);
 	let coherence = $state(0);
 	let sigEnergy = $state(0);
 
@@ -127,7 +122,6 @@
 	let pearsonSpin = $state(0);
 	let pearsonDir = $state<1 | -1>(1);
 	let pearsonPhase = $state(0);
-	let pearsonFlip = $state(0);
 	let zAgree = $state(0);
 
 	let dominant = $state<Channel>('baseline');
@@ -137,12 +131,11 @@
 
 	// === Cheat / Debug ===
 	let cheatBoost = $state(0); // injected fake coherence (0..1), decays slowly
-	let cheatChannel = $state<Exclude<Channel, 'baseline'>>('correlated'); // which channel the cheat "looks like"
+	let cheatChannel = $state<Exclude<Channel, 'baseline'>>('correlated_high'); // which channel the cheat "looks like"
 
 	// === History for strip chart (last 180 seconds at 1Hz) ===
 	const HISTORY_LEN = 180;
 	let historyCoherence: number[] = $state([]);
-	let historyStageEnergy: number[] = $state([]);
 	let historyDominant: Channel[] = $state([]);
 	let historyPearson: number[] = $state([]);
 
@@ -177,39 +170,44 @@
 		currentZ: number; // current z-score from startTick to now
 		strength: number; // derived strength (0..1)
 	};
+	const defaultEpisode = (): EpisodeState => ({ startTick: 0, peakZ: 0, currentZ: 0, strength: 0 });
 	let episodes = $state<Record<Exclude<Channel, 'baseline'>, EpisodeState>>({
-		correlated: { startTick: 0, peakZ: 0, currentZ: 0, strength: 0 },
-		anti: { startTick: 0, peakZ: 0, currentZ: 0, strength: 0 },
-		stick: { startTick: 0, peakZ: 0, currentZ: 0, strength: 0 },
-		pearson: { startTick: 0, peakZ: 0, currentZ: 0, strength: 0 }
+		correlated_high: defaultEpisode(),
+		correlated_low: defaultEpisode(),
+		anti_ab: defaultEpisode(),
+		anti_ba: defaultEpisode(),
+		stick: defaultEpisode()
 	});
 
 	let rawLast: Record<Exclude<Channel, 'baseline'>, number> = {
-		correlated: 0,
-		anti: 0,
-		stick: 0,
-		pearson: 0
+		correlated_high: 0,
+		correlated_low: 0,
+		anti_ab: 0,
+		anti_ba: 0,
+		stick: 0
 	};
 	let rawRender: Record<Exclude<Channel, 'baseline'>, number> = {
-		correlated: 0,
-		anti: 0,
-		stick: 0,
-		pearson: 0
+		correlated_high: 0,
+		correlated_low: 0,
+		anti_ab: 0,
+		anti_ba: 0,
+		stick: 0
 	};
 
-	// Render-smoothed versions (updated every frame, not just on ticks)
-	let stageEnergyRender = 0;
+	// Render-smoothed version (updated every frame, not just on ticks)
 	let sigEnergyRender = 0;
 
 	let bufCanvas: HTMLCanvasElement;
 	let bufCtx: CanvasRenderingContext2D;
 	let renderScale = 0.75;
 
+	// Channel colors: light/dark pairs for directional channels
 	const palette: Record<Exclude<Channel, 'baseline'>, { hue: number; name: string }> = {
-		correlated: { hue: 186, name: 'Correlated' },
-		anti: { hue: 24, name: 'Anti' },
-		stick: { hue: 112, name: 'Stick' },
-		pearson: { hue: 252, name: 'Pearson' }
+		correlated_high: { hue: 180, name: 'Corr +' }, // Light teal/cyan (both toward 1s)
+		correlated_low: { hue: 210, name: 'Corr -' }, // Dark teal/blue (both toward 0s)
+		anti_ab: { hue: 35, name: 'Anti A>B' }, // Orange/amber (A high, B low)
+		anti_ba: { hue: 8, name: 'Anti B>A' }, // Coral/red (B high, A low)
+		stick: { hue: 112, name: 'Stick' } // Green (agreement)
 	};
 
 	// === Utility Functions ===
@@ -402,13 +400,10 @@
 		pearsonSpin = 0;
 		pearsonDir = 1;
 		pearsonPhase = 0;
-		pearsonFlip = 0;
 		zAgree = 0;
 
 		coherence = 0;
-		stageEnergy = 0;
 		sigEnergy = 0;
-		stage = 1;
 		tickBudget = 0;
 
 		dominant = 'baseline';
@@ -427,15 +422,15 @@
 
 		// Reset episode states
 		episodes = {
-			correlated: { startTick: 0, peakZ: 0, currentZ: 0, strength: 0 },
-			anti: { startTick: 0, peakZ: 0, currentZ: 0, strength: 0 },
-			stick: { startTick: 0, peakZ: 0, currentZ: 0, strength: 0 },
-			pearson: { startTick: 0, peakZ: 0, currentZ: 0, strength: 0 }
+			correlated_high: defaultEpisode(),
+			correlated_low: defaultEpisode(),
+			anti_ab: defaultEpisode(),
+			anti_ba: defaultEpisode(),
+			stick: defaultEpisode()
 		};
 
 		// Clear history
 		historyCoherence = [];
-		historyStageEnergy = [];
 		historyDominant = [];
 		historyPearson = [];
 	}
@@ -506,15 +501,6 @@
 		if (dominant === 'baseline' && dominance < 0.05) dominant = 'baseline';
 	}
 
-	function computeStageFromEnergy(e: number, prev: Stage): Stage {
-		if (prev === 1) return e > 0.42 ? 2 : 1;
-		if (prev === 2) {
-			if (e > 0.78) return 3;
-			return e < 0.34 ? 1 : 2;
-		}
-		return e < 0.68 ? 2 : 3;
-	}
-
 	function signalTick() {
 		// Fresh 200-bit samples
 		bitsA = randBits(sampleBits);
@@ -563,14 +549,14 @@
 		const spPearson = findOptimalStartingPointPearson(cumSumXY, cumSumA, cumSumB, currentIdx, N);
 
 		// === Compute channel strengths from segments ===
+		// Now with directional channels: correlated_high, correlated_low, anti_ab, anti_ba
 
 		// Correlated: both streams deviate in same direction
-		// We check if the optimal segments for A and B overlap and agree in sign
-		let corrZ = 0;
+		let corrHighZ = 0;
+		let corrLowZ = 0;
 		let corrStart = currentIdx;
 		if (spA.z * spB.z > 0) {
 			// Same sign - correlated
-			// Use the more recent starting point (more conservative segment)
 			const commonStart = Math.max(spA.startIdx, spB.startIdx);
 			const tickSpan = currentIdx - commonStart;
 			if (tickSpan >= MIN_SEGMENT_LEN) {
@@ -579,14 +565,20 @@
 				const deltaB = (cumSumB[currentIdx] ?? 0) - (cumSumB[commonStart] ?? 0);
 				const zA_seg = deltaA / Math.sqrt(bitSpan);
 				const zB_seg = deltaB / Math.sqrt(bitSpan);
-				// Correlated strength is the weaker of the two
-				corrZ = Math.sign(zA_seg) * Math.min(Math.abs(zA_seg), Math.abs(zB_seg));
+				// Strength is the weaker of the two
+				const strength = Math.min(Math.abs(zA_seg), Math.abs(zB_seg));
+				if (zA_seg > 0 && zB_seg > 0) {
+					corrHighZ = strength; // Both toward 1s
+				} else {
+					corrLowZ = strength; // Both toward 0s
+				}
 				corrStart = commonStart;
 			}
 		}
 
 		// Anti-correlated: streams deviate in opposite directions
-		let antiZ = 0;
+		let antiAbZ = 0; // A high, B low
+		let antiBaZ = 0; // B high, A low
 		let antiStart = currentIdx;
 		if (spA.z * spB.z < 0) {
 			// Opposite sign - anti-correlated
@@ -598,8 +590,13 @@
 				const deltaB = (cumSumB[currentIdx] ?? 0) - (cumSumB[commonStart] ?? 0);
 				const zA_seg = deltaA / Math.sqrt(bitSpan);
 				const zB_seg = deltaB / Math.sqrt(bitSpan);
-				// Anti strength is the weaker magnitude
-				antiZ = Math.min(Math.abs(zA_seg), Math.abs(zB_seg));
+				// Strength is the weaker magnitude
+				const strength = Math.min(Math.abs(zA_seg), Math.abs(zB_seg));
+				if (zA_seg > 0 && zB_seg < 0) {
+					antiAbZ = strength; // A high, B low
+				} else {
+					antiBaZ = strength; // B high, A low
+				}
 				antiStart = commonStart;
 			}
 		}
@@ -608,22 +605,19 @@
 		const stickZ = spAgree.z;
 		const stickStart = spAgree.startIdx;
 
-		// Pearson
+		// Pearson (for visual effect only, not a competing channel)
 		const pearsonZ_seg = spPearson.z;
 		const pearsonR_seg = spPearson.r;
-		const pearsonStart = spPearson.startIdx;
 
 		// === Convert z-scores to strengths (0..1) ===
-		const corrRaw = strengthFromZ(corrZ);
-		const antiRaw = strengthFromZ(antiZ);
+		const corrHighRaw = strengthFromZ(corrHighZ);
+		const corrLowRaw = strengthFromZ(corrLowZ);
+		const antiAbRaw = strengthFromZ(antiAbZ);
+		const antiBaRaw = strengthFromZ(antiBaZ);
 		const stickRaw = strengthFromZ(stickZ, STICK_Z_START, STICK_Z_FULL);
-		const pearsonRaw = clamp01(
-			(Math.abs(pearsonR_seg) - PEARSON_R_START) / (PEARSON_R_FULL - PEARSON_R_START)
-		);
 
 		// === Update episode states ===
-		// Episodes have persistence: once started, they continue until z drops significantly
-		const EPISODE_DECAY_THRESHOLD = 0.8; // Episode ends when z drops to this fraction of peak
+		const EPISODE_DECAY_THRESHOLD = 0.8;
 
 		function updateEpisode(
 			channel: Exclude<Channel, 'baseline'>,
@@ -634,35 +628,30 @@
 			const absZ = Math.abs(currentZ);
 
 			if (absZ > EPISODE_Z_THRESHOLD) {
-				// Strong signal - we're in an episode
 				if (absZ > ep.peakZ) {
-					// New peak - might be start of new episode or continuation
 					if (ep.peakZ < EPISODE_Z_THRESHOLD) {
-						// Starting fresh episode
 						ep.startTick = segmentStart;
 					}
 					ep.peakZ = absZ;
 				}
 				ep.currentZ = absZ;
 			} else if (ep.peakZ > EPISODE_Z_THRESHOLD && absZ < ep.peakZ * EPISODE_DECAY_THRESHOLD) {
-				// Episode has decayed - reset
 				ep.startTick = currentIdx;
 				ep.peakZ = absZ;
 				ep.currentZ = absZ;
 			} else {
-				// Maintain current episode state but update currentZ
 				ep.currentZ = absZ;
 			}
 
-			// Compute strength: use peak z during active episode for stability
 			const effectiveZ = ep.peakZ > EPISODE_Z_THRESHOLD ? Math.max(absZ, ep.peakZ * 0.7) : absZ;
 			ep.strength = strengthFromZ(effectiveZ, STRENGTH_Z_START, STRENGTH_Z_FULL);
 		}
 
-		updateEpisode('correlated', corrZ, corrStart);
-		updateEpisode('anti', antiZ, antiStart);
+		updateEpisode('correlated_high', corrHighZ, corrStart);
+		updateEpisode('correlated_low', corrLowZ, corrStart);
+		updateEpisode('anti_ab', antiAbZ, antiStart);
+		updateEpisode('anti_ba', antiBaZ, antiStart);
 		updateEpisode('stick', stickZ, stickStart);
-		updateEpisode('pearson', pearsonZ_seg, pearsonStart);
 
 		// === Smooth stats for HUD ===
 		const statsTau = 2800;
@@ -673,53 +662,62 @@
 		zAgree = zAgree + (stickZ - zAgree) * k;
 		pearsonR = pearsonR + (pearsonR_seg - pearsonR) * k;
 
-		// Apply cheat boost to the selected channel so it affects dominance/color
-		const raw = {
-			correlated: cheatChannel === 'correlated' ? Math.min(1, corrRaw + cheatBoost) : corrRaw,
-			anti: cheatChannel === 'anti' ? Math.min(1, antiRaw + cheatBoost) : antiRaw,
-			stick: cheatChannel === 'stick' ? Math.min(1, stickRaw + cheatBoost) : stickRaw,
-			pearson: cheatChannel === 'pearson' ? Math.min(1, pearsonRaw + cheatBoost) : pearsonRaw
+		// Build raw channel strengths with cheat boost applied
+		const raw: Record<Exclude<Channel, 'baseline'>, number> = {
+			correlated_high:
+				cheatChannel === 'correlated_high' ? Math.min(1, corrHighRaw + cheatBoost) : corrHighRaw,
+			correlated_low:
+				cheatChannel === 'correlated_low' ? Math.min(1, corrLowRaw + cheatBoost) : corrLowRaw,
+			anti_ab: cheatChannel === 'anti_ab' ? Math.min(1, antiAbRaw + cheatBoost) : antiAbRaw,
+			anti_ba: cheatChannel === 'anti_ba' ? Math.min(1, antiBaRaw + cheatBoost) : antiBaRaw,
+			stick: cheatChannel === 'stick' ? Math.min(1, stickRaw + cheatBoost) : stickRaw
 		};
 		rawLast = raw;
 
 		updateDominant(raw, 1000 / Math.max(0.25, updatesPerSec));
 
-		// Coherence = max channel strength (cheat is already folded into raw)
-		const base = Math.max(raw.correlated, raw.anti, raw.stick, raw.pearson);
-		coherence = base;
+		// Coherence = max channel strength
+		coherence = Math.max(
+			raw.correlated_high,
+			raw.correlated_low,
+			raw.anti_ab,
+			raw.anti_ba,
+			raw.stick
+		);
 
-		// Decay cheat boost slowly (0.97 per tick at 1Hz = ~23 ticks to halve ≈ 23 seconds)
+		// Decay cheat boost slowly
 		cheatBoost *= 0.97;
 		if (cheatBoost < 0.01) cheatBoost = 0;
 
-		// Stage energy integrator (slow rise, slower fall) - uses mode preset
+		// Significance energy (p-value based)
 		const dtMs = 1000 / Math.max(0.25, updatesPerSec);
-		const stageTau = coherence > stageEnergy ? preset.stageEnergyRiseMs : preset.stageEnergyFallMs;
-		const ek = 1 - Math.exp(-dtMs / stageTau);
-		stageEnergy = stageEnergy + (coherence - stageEnergy) * ek;
-		stage = computeStageFromEnergy(stageEnergy, stage);
-
-		// Significance energy (p-value based) - now using segment z-scores
-		const pCorr = corrZ !== 0 ? twoSidedPFromZ(corrZ) : 1;
-		const pAnti = antiZ !== 0 ? twoSidedPFromZ(antiZ) : 1;
+		const pCorrHigh = corrHighZ !== 0 ? twoSidedPFromZ(corrHighZ) : 1;
+		const pCorrLow = corrLowZ !== 0 ? twoSidedPFromZ(corrLowZ) : 1;
+		const pAntiAb = antiAbZ !== 0 ? twoSidedPFromZ(antiAbZ) : 1;
+		const pAntiBa = antiBaZ !== 0 ? twoSidedPFromZ(antiBaZ) : 1;
 		const pStick = stickZ !== 0 ? twoSidedPFromZ(stickZ) : 1;
 		const pPearson = pearsonZ_seg !== 0 ? twoSidedPFromZ(pearsonZ_seg) : 1;
 
-		// If cheat is active, fake a low p-value to drive sigEnergy
-		const pOverallReal = Math.min(COHERENCE_FLOOR, Math.min(pCorr, pAnti, pStick, pPearson));
+		const pOverallReal = Math.min(
+			COHERENCE_FLOOR,
+			pCorrHigh,
+			pCorrLow,
+			pAntiAb,
+			pAntiBa,
+			pStick,
+			pPearson
+		);
 		const pOverall =
 			cheatBoost > 0.05 ? Math.min(pOverallReal, 0.001 * (1 - cheatBoost)) : pOverallReal;
 		const surprisal = Math.min(6, -Math.log10(pOverall));
 		const targetSig = clamp01((surprisal - 0.8) / 4.8);
 
-		// Significance energy uses mode preset
 		const sigTau = targetSig > sigEnergy ? preset.sigEnergyRiseMs : preset.sigEnergyFallMs;
 		const sk = 1 - Math.exp(-dtMs / sigTau);
 		sigEnergy = sigEnergy + (targetSig - sigEnergy) * sk;
 
 		// Record history
 		historyCoherence = [...historyCoherence.slice(-(HISTORY_LEN - 1)), coherence];
-		historyStageEnergy = [...historyStageEnergy.slice(-(HISTORY_LEN - 1)), stageEnergy];
 		historyDominant = [...historyDominant.slice(-(HISTORY_LEN - 1)), dominant];
 		historyPearson = [...historyPearson.slice(-(HISTORY_LEN - 1)), pearsonR];
 	}
@@ -744,14 +742,13 @@
 			dominant = 'baseline';
 			dominance = 0;
 			coherence = 0;
-			stageEnergy = 0;
 			sigEnergy = 0;
-			stage = 1;
-			rawLast = { correlated: 0, anti: 0, stick: 0, pearson: 0 };
-			rawRender = { correlated: 0, anti: 0, stick: 0, pearson: 0 };
+			rawLast = { correlated_high: 0, correlated_low: 0, anti_ab: 0, anti_ba: 0, stick: 0 };
+			rawRender = { correlated_high: 0, correlated_low: 0, anti_ab: 0, anti_ba: 0, stick: 0 };
 		}
 
-		// Pearson motion
+		// Pearson motion - drives the swirling disc effect
+		// Still when |r| < threshold, spins when significant
 		{
 			const dt = dtMs / 1000;
 			const spinTau = 900;
@@ -759,33 +756,34 @@
 			pearsonSpin = pearsonSpin + (pearsonR - pearsonSpin) * sk;
 
 			if (!bootLock) {
-				const flipThreshold = 0.055;
-				let nextDir = pearsonDir;
-				if (pearsonDir === 1 && pearsonSpin < -flipThreshold) nextDir = -1;
-				if (pearsonDir === -1 && pearsonSpin > flipThreshold) nextDir = 1;
-				if (nextDir !== pearsonDir) {
-					pearsonDir = nextDir;
-					pearsonFlip = 1;
+				// Direction based on sign of pearson
+				const flipThreshold = 0.05; // threshold to consider "still"
+				if (Math.abs(pearsonSpin) > flipThreshold) {
+					pearsonDir = pearsonSpin > 0 ? 1 : -1;
 				}
+				// else keep previous direction (avoids jitter near zero)
 			} else {
 				pearsonDir = 1;
 			}
 
-			pearsonFlip *= Math.exp(-dtMs / 650);
-
-			const mag = Math.min(1, Math.abs(pearsonSpin));
-			const baseSpeed = 0.03;
-			const gain = 0.26;
-			const speed = baseSpeed + gain * Math.pow(mag, 0.82);
+			// Speed: still when |r| < 0.05, then ramp up
+			const PEARSON_STILL_THRESHOLD = 0.05;
+			const mag = Math.max(0, Math.abs(pearsonSpin) - PEARSON_STILL_THRESHOLD);
+			const speed = mag > 0 ? 0.08 + 0.35 * Math.pow(mag / (1 - PEARSON_STILL_THRESHOLD), 0.7) : 0;
 			pearsonPhase = wrapHue(pearsonPhase + pearsonDir * speed * 360 * dt);
 		}
 
-		// Smooth channel strengths more aggressively to eliminate flicker
-		// Use asymmetric smoothing: rise can be a bit faster than fall
+		// Smooth channel strengths
 		{
-			const riseTau = 1800; // ~1.8s to rise
-			const fallTau = 4000; // ~4s to fall
-			for (const ch of ['correlated', 'anti', 'stick', 'pearson'] as const) {
+			const riseTau = 1800;
+			const fallTau = 4000;
+			for (const ch of [
+				'correlated_high',
+				'correlated_low',
+				'anti_ab',
+				'anti_ba',
+				'stick'
+			] as const) {
 				const target = rawLast[ch];
 				const current = rawRender[ch];
 				const tau = target > current ? riseTau : fallTau;
@@ -794,12 +792,10 @@
 			}
 		}
 
-		// Per-frame smoothing of stageEnergy and sigEnergy for rendering
-		// This eliminates the "stepping" when signal ticks update the values
+		// Per-frame smoothing of sigEnergy for rendering
 		{
-			const tau = 600; // fast follow, but still smooths out the discrete ticks
+			const tau = 600;
 			const k = 1 - Math.exp(-dtMs / tau);
-			stageEnergyRender = stageEnergyRender + (stageEnergy - stageEnergyRender) * k;
 			sigEnergyRender = sigEnergyRender + (sigEnergy - sigEnergyRender) * k;
 		}
 
@@ -811,7 +807,8 @@
 				baselineHueNextAtMs = nowMs + 15000;
 			}
 			if (nowMs >= baselineHueNextAtMs) {
-				const picks = [186, 24, 112, 252, 205];
+				// Pick from channel hues for wandering
+				const picks = [180, 210, 35, 8, 112, 205];
 				baselineHueTarget = picks[Math.floor(Math.random() * picks.length)];
 				baselineHueNextAtMs = nowMs + 12000 + Math.random() * 22000;
 			}
@@ -819,13 +816,12 @@
 
 		// Hue smoothing - uses mode preset
 		const baseHue = dominant === 'baseline' ? baselineHueTarget : palette[dominant].hue;
-		// Baseline wandering is always slow; channel colors use preset
 		const hueTau = dominant === 'baseline' ? 14000 : preset.hueTauMs;
 		const hk = 1 - Math.exp(-dtMs / hueTau);
 		hueSmooth = hueApproach(hueSmooth, baseHue, hk);
 
-		// Saturation smoothing - uses mode preset with saturation boost
-		const baseSat = dominant === 'baseline' ? 52 : dominant === 'pearson' ? 72 : 80;
+		// Saturation smoothing
+		const baseSat = dominant === 'baseline' ? 52 : 80;
 		const satTarget = baseSat + preset.saturationBoost;
 		const sk = 1 - Math.exp(-dtMs / preset.satTauMs);
 		satSmooth = satSmooth + (satTarget - satSmooth) * sk;
@@ -868,8 +864,8 @@
 		const cy = h * 0.35;
 		const r = Math.min(w, h) * 0.18;
 
-		// Simple brightness circle based on stageEnergy
-		const brightness = 0.1 + 0.9 * stageEnergyRender;
+		// Simple brightness circle based on sigEnergy
+		const brightness = 0.1 + 0.9 * sigEnergyRender;
 		const hue = hueSmooth;
 
 		ctx.beginPath();
@@ -937,14 +933,15 @@
 			ctx.stroke();
 		}
 
-		// Draw stageEnergy history (cyan)
-		if (historyStageEnergy.length > 1) {
+		// Draw Pearson history (cyan)
+		if (historyPearson.length > 1) {
 			ctx.strokeStyle = 'rgba(100, 220, 255, 0.7)';
 			ctx.lineWidth = 2;
 			ctx.beginPath();
-			for (let i = 0; i < historyStageEnergy.length; i++) {
+			for (let i = 0; i < historyPearson.length; i++) {
 				const x = chartX + (i / (HISTORY_LEN - 1)) * chartW;
-				const y = chartY + chartH * (1 - historyStageEnergy[i]);
+				// Pearson ranges -1 to 1, map to 0-1 for display
+				const y = chartY + chartH * (1 - (historyPearson[i] + 1) / 2);
 				if (i === 0) ctx.moveTo(x, y);
 				else ctx.lineTo(x, y);
 			}
@@ -956,7 +953,7 @@
 		ctx.font = '12px monospace';
 		ctx.fillText('coherence', chartX + 4, chartY + 14);
 		ctx.fillStyle = 'rgba(100, 220, 255, 0.8)';
-		ctx.fillText('stageEnergy', chartX + 80, chartY + 14);
+		ctx.fillText('pearson', chartX + 80, chartY + 14);
 
 		// Time labels
 		ctx.fillStyle = 'rgba(255,255,255,0.4)';
@@ -1000,7 +997,6 @@
 
 		const bootT = clamp01(bootMs / 5000);
 		const bootLock = bootT < 1;
-		const e = stageEnergyRender; // stageEnergy for stage transitions and color effects
 		const sig = sigEnergyRender; // sigEnergy (statistical significance) for brightness
 
 		const cx = w * 0.5;
@@ -1015,15 +1011,11 @@
 		const polarity = Math.max(-1, Math.min(1, (zA + zB) / 6));
 		hue = (hue + polarity * 10 + 6 * Math.sin(t * 0.08) + 3 * Math.sin(t * 0.13 + 1.7)) % 360;
 
-		// Whitening still uses stageEnergy (for stage-based effects)
-		const whitenStage2 = smoothstep(0.36, 0.78, e) * 0.62;
-		const sheen = stage === 3 ? smoothstep(0.68, 0.98, e) : 0;
-		const whitenStage3 = stage === 3 ? 0.62 + sheen * 0.12 : 0;
-		const whiten = stage === 1 ? 0 : stage === 2 ? whitenStage2 : whitenStage3;
+		// Whitening based on significance energy (replaces old stage system)
+		const whiten = smoothstep(0.3, 0.8, sig) * 0.5;
 
 		// Brightness now driven by statistical significance (sigEnergy)
 		// More aggressive curve: very dim at baseline, dramatic when significant
-		// "The brighter the Light, the smaller the probability that it is happening by chance"
 		const sigVis = Math.max(sig, 0.03); // small floor to avoid total darkness
 		const brightness = (0.08 + 0.92 * Math.pow(sigVis, 1.3)) * preset.maxBrightness;
 		const orbAlpha = 0.5 + 0.4 * brightness;
@@ -1156,91 +1148,65 @@
 			ctx.filter = 'none';
 		}
 
-		// Stage 3 iridescence
-		if (sheen > 0) {
-			ctx.globalCompositeOperation = 'screen';
-			ctx.globalAlpha = 0.06 * sheen * raw.pearson * (1 + 0.6 * pearsonFlip);
-			ctx.filter = `blur(${Math.max(16, 22 + 14 * brightness - 6 * pearsonFlip)}px)`;
-
-			const maybeConic = (
-				ctx as unknown as {
-					createConicGradient?: (a: number, x: number, y: number) => CanvasGradient;
-				}
-			).createConicGradient;
-			if (typeof maybeConic === 'function') {
-				const cg = maybeConic.call(ctx, (pearsonPhase / 360) * Math.PI * 2, cx, cy);
-				cg.addColorStop(0.0, 'rgba(255, 170, 210, 0.55)');
-				cg.addColorStop(0.3, 'rgba(255, 235, 180, 0.55)');
-				cg.addColorStop(0.55, 'rgba(180, 255, 235, 0.55)');
-				cg.addColorStop(0.78, 'rgba(175, 200, 255, 0.55)');
-				cg.addColorStop(1.0, 'rgba(255, 170, 210, 0.55)');
-				ctx.fillStyle = cg;
-				ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-			}
-
-			ctx.globalAlpha = 1;
-			ctx.filter = 'none';
-		}
-
-		ctx.restore();
-
-		// Pearson ring
+		// Pearson swirling disc effect (replaces old ring)
+		// Creates a spinning water/record effect when |pearsonR| > threshold
 		{
-			const p = raw.pearson;
-			const pStrength = smoothstep(0.06, 0.8, p);
-			if (pStrength > 0.001) {
-				const ringPhase = (pearsonPhase / 360) * Math.PI * 2;
-				const outerR = r * 1.05;
-				const innerR = r * 0.93;
-				const ringBlur = Math.max(10, 14 + 14 * pStrength + 6 * brightness);
+			const PEARSON_VIS_THRESHOLD = 0.05;
+			const pMag = Math.abs(pearsonSpin);
 
-				ctx.save();
-				ctx.globalCompositeOperation = 'screen';
-				ctx.globalAlpha =
-					(0.06 + 0.18 * pStrength) * (0.5 + 0.5 * stageEnergyRender) * (1 + 0.45 * pearsonFlip);
-				ctx.filter = `blur(${Math.max(8, ringBlur - 6 * pearsonFlip)}px)`;
+			if (!bootLock && pMag > PEARSON_VIS_THRESHOLD) {
+				// Strength of swirl effect based on |r|
+				const swirlStrength = smoothstep(PEARSON_VIS_THRESHOLD, 0.4, pMag);
+				const swirlPhase = (pearsonPhase / 360) * Math.PI * 2;
 
-				ctx.beginPath();
-				ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
-				ctx.arc(cx, cy, innerR, 0, Math.PI * 2, true);
-				ctx.closePath();
-				ctx.clip();
+				ctx.globalCompositeOperation = 'soft-light';
+				ctx.globalAlpha = 0.25 + 0.35 * swirlStrength;
+				ctx.filter = `blur(${Math.max(8, 16 - 6 * swirlStrength)}px)`;
 
 				const maybeConic = (
 					ctx as unknown as {
 						createConicGradient?: (a: number, x: number, y: number) => CanvasGradient;
 					}
 				).createConicGradient;
+
 				if (typeof maybeConic === 'function') {
-					const cg = maybeConic.call(ctx, ringPhase, cx, cy);
-					cg.addColorStop(0.0, 'rgba(255, 230, 245, 0.75)');
-					cg.addColorStop(0.18, 'rgba(220, 245, 255, 0.75)');
-					cg.addColorStop(0.36, 'rgba(255, 245, 215, 0.75)');
-					cg.addColorStop(0.56, 'rgba(225, 255, 235, 0.75)');
-					cg.addColorStop(0.78, 'rgba(235, 230, 255, 0.75)');
-					cg.addColorStop(1.0, 'rgba(255, 230, 245, 0.75)');
+					// Swirling water effect with light/dark bands
+					const cg = maybeConic.call(ctx, swirlPhase, cx, cy);
+					// Light/dark bands like swirling water or a vinyl record
+					const bandCount = 4; // Number of light/dark pairs
+					for (let i = 0; i <= bandCount; i++) {
+						const pos = i / bandCount;
+						const isLight = i % 2 === 0;
+						if (isLight) {
+							cg.addColorStop(pos, `rgba(255, 255, 255, ${0.3 + 0.2 * swirlStrength})`);
+						} else {
+							cg.addColorStop(pos, `rgba(0, 0, 0, ${0.15 + 0.1 * swirlStrength})`);
+						}
+					}
 					ctx.fillStyle = cg;
-					ctx.fillRect(cx - outerR - 2, cy - outerR - 2, (outerR + 2) * 2, (outerR + 2) * 2);
+					ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 				} else {
-					const g1 = ctx.createLinearGradient(cx - outerR, cy - outerR, cx + outerR, cy + outerR);
-					g1.addColorStop(0, 'rgba(255,240,250,0.55)');
-					g1.addColorStop(0.5, 'rgba(200,240,255,0.35)');
-					g1.addColorStop(1, 'rgba(240,255,220,0.45)');
-					ctx.fillStyle = g1;
-					ctx.fillRect(cx - outerR - 2, cy - outerR - 2, (outerR + 2) * 2, (outerR + 2) * 2);
+					// Fallback: simple rotating gradient
+					const angle = swirlPhase;
+					const x1 = cx + Math.cos(angle) * r;
+					const y1 = cy + Math.sin(angle) * r;
+					const x2 = cx - Math.cos(angle) * r;
+					const y2 = cy - Math.sin(angle) * r;
+					const lg = ctx.createLinearGradient(x1, y1, x2, y2);
+					lg.addColorStop(0, `rgba(255, 255, 255, ${0.25 * swirlStrength})`);
+					lg.addColorStop(0.5, `rgba(0, 0, 0, ${0.1 * swirlStrength})`);
+					lg.addColorStop(1, `rgba(255, 255, 255, ${0.25 * swirlStrength})`);
+					ctx.fillStyle = lg;
+					ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 				}
 
-				ctx.globalCompositeOperation = 'multiply';
-				ctx.globalAlpha = 0.22 * pStrength;
-				const shade = ctx.createRadialGradient(cx, cy, innerR * 0.9, cx, cy, outerR);
-				shade.addColorStop(0, 'rgba(0,0,0,0.0)');
-				shade.addColorStop(1, 'rgba(0,0,0,0.55)');
-				ctx.fillStyle = shade;
-				ctx.fillRect(cx - outerR - 2, cy - outerR - 2, (outerR + 2) * 2, (outerR + 2) * 2);
-
-				ctx.restore();
+				ctx.globalAlpha = 1;
+				ctx.filter = 'none';
+				ctx.globalCompositeOperation = 'source-over';
 			}
 		}
+
+		ctx.restore();
 
 		// Outer glow
 		ctx.globalCompositeOperation = 'screen';
@@ -1404,7 +1370,7 @@
 			<div class="hud-title">
 				<div class="hud-name">Wyrdlight</div>
 				<div class="hud-mode">
-					{lightMode === 'wow' ? 'Wow' : 'Mellow'} | Speed {responseSpeed} | Stage {stage}
+					{lightMode === 'wow' ? 'Wow' : 'Mellow'} | Speed {responseSpeed}
 				</div>
 			</div>
 
@@ -1417,8 +1383,8 @@
 				<span class="v">{(coherence * 100).toFixed(1)}%</span>
 			</div>
 			<div class="hud-row">
-				<span class="k">Stage Energy</span>
-				<span class="v">{(stageEnergy * 100).toFixed(1)}%</span>
+				<span class="k">Significance</span>
+				<span class="v">{(sigEnergy * 100).toFixed(1)}%</span>
 			</div>
 			<div class="hud-row">
 				<span class="k">zA / zB</span>
@@ -1487,16 +1453,24 @@
 			{#if showLegend}
 				<div class="legend">
 					<div class="legend-row">
-						<span class="swatch" style={`--h:${palette.correlated.hue}`}></span> Teal: Correlated drift
+						<span class="swatch" style={`--h:${palette.correlated_high.hue}`}></span> Cyan: Both high
+						(1s)
 					</div>
 					<div class="legend-row">
-						<span class="swatch" style={`--h:${palette.anti.hue}`}></span> Ember: Anti-correlated drift
+						<span class="swatch" style={`--h:${palette.correlated_low.hue}`}></span> Blue: Both low (0s)
 					</div>
 					<div class="legend-row">
-						<span class="swatch" style={`--h:${palette.stick.hue}`}></span> Green: "Stick together" (rarer)
+						<span class="swatch" style={`--h:${palette.anti_ab.hue}`}></span> Orange: A high, B low
 					</div>
 					<div class="legend-row">
-						<span class="swatch" style={`--h:${palette.pearson.hue}`}></span> Pearl ring: Pearson correlation
+						<span class="swatch" style={`--h:${palette.anti_ba.hue}`}></span> Coral: B high, A low
+					</div>
+					<div class="legend-row">
+						<span class="swatch" style={`--h:${palette.stick.hue}`}></span> Green: Stick together
+					</div>
+					<div class="legend-row">
+						<span class="swatch" style="--h:0; background: linear-gradient(90deg, #fff, #888, #fff)"
+						></span> Spin: Pearson (+ clockwise, - counter)
 					</div>
 				</div>
 			{/if}
