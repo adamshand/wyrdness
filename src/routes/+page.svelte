@@ -4,6 +4,55 @@
 	type Stage = 1 | 2 | 3;
 	type Channel = 'baseline' | 'correlated' | 'anti' | 'stick' | 'pearson';
 	type RenderMode = 'orb' | 'signal';
+	type LightMode = 'wow' | 'mellow';
+
+	// === Mode Presets ===
+	// Wyrd Light has "Wow (for showing off)" and "Mellow (for meetings and retreats)"
+	// plus 5 response speed settings. We combine these into mode presets.
+	type ModePreset = {
+		// Smoothing time constants (ms)
+		stageEnergyRiseMs: number;
+		stageEnergyFallMs: number;
+		sigEnergyRiseMs: number;
+		sigEnergyFallMs: number;
+		hueTauMs: number;
+		satTauMs: number;
+		// Visual intensity
+		maxBrightness: number; // 0..1 multiplier on brightness
+		saturationBoost: number; // added to base saturation
+		// Dominance behavior
+		switchMargin: number; // how much stronger new channel must be to take over
+		keepBonus: number; // bonus to current channel to prevent rapid switching
+	};
+
+	const MODE_PRESETS: Record<LightMode, ModePreset> = {
+		wow: {
+			// Faster response, more dramatic
+			stageEnergyRiseMs: 1800,
+			stageEnergyFallMs: 3000,
+			sigEnergyRiseMs: 1000,
+			sigEnergyFallMs: 2000,
+			hueTauMs: 6000,
+			satTauMs: 5000,
+			maxBrightness: 1.0,
+			saturationBoost: 12,
+			switchMargin: 0.06,
+			keepBonus: 0.03
+		},
+		mellow: {
+			// Slower, softer, more stable for meetings
+			stageEnergyRiseMs: 3400,
+			stageEnergyFallMs: 5500,
+			sigEnergyRiseMs: 2000,
+			sigEnergyFallMs: 3600,
+			hueTauMs: 14000,
+			satTauMs: 12000,
+			maxBrightness: 0.85,
+			saturationBoost: 0,
+			switchMargin: 0.12,
+			keepBonus: 0.06
+		}
+	};
 
 	let canvasEl: HTMLCanvasElement;
 
@@ -12,6 +61,10 @@
 	let showSettings = $state(false);
 	let showLegend = $state(false);
 	let renderMode = $state<RenderMode>('orb');
+	let lightMode = $state<LightMode>('mellow'); // default to mellow for calmer experience
+
+	// Derived preset from current mode
+	const preset = $derived(MODE_PRESETS[lightMode]);
 
 	// === Signal Engine Config ===
 	// 200-bit samples at 1Hz matches Wyrd's description
@@ -414,8 +467,8 @@
 		const next: Channel = bestV > DOMINANCE_THRESHOLD && best ? best : 'baseline';
 		const nextStrength = next === 'baseline' ? 0 : bestV;
 
-		const switchMargin = 0.08;
-		const keepBonus = 0.04;
+		// Use preset values for mode-dependent behavior
+		const { switchMargin, keepBonus } = preset;
 
 		let currentStrength = 0;
 		if (dominant !== 'baseline') currentStrength = raw[dominant] ?? 0;
@@ -619,12 +672,10 @@
 		cheatBoost *= 0.97;
 		if (cheatBoost < 0.01) cheatBoost = 0;
 
-		// Stage energy integrator (slow rise, slower fall)
-		const riseMs = 2600;
-		const fallMs = 4200;
+		// Stage energy integrator (slow rise, slower fall) - uses mode preset
 		const dtMs = 1000 / Math.max(0.25, updatesPerSec);
-		const tau = coherence > stageEnergy ? riseMs : fallMs;
-		const ek = 1 - Math.exp(-dtMs / tau);
+		const stageTau = coherence > stageEnergy ? preset.stageEnergyRiseMs : preset.stageEnergyFallMs;
+		const ek = 1 - Math.exp(-dtMs / stageTau);
 		stageEnergy = stageEnergy + (coherence - stageEnergy) * ek;
 		stage = computeStageFromEnergy(stageEnergy, stage);
 
@@ -641,9 +692,8 @@
 		const surprisal = Math.min(6, -Math.log10(pOverall));
 		const targetSig = clamp01((surprisal - 0.8) / 4.8);
 
-		const sigRiseMs = 1400;
-		const sigFallMs = 2600;
-		const sigTau = targetSig > sigEnergy ? sigRiseMs : sigFallMs;
+		// Significance energy uses mode preset
+		const sigTau = targetSig > sigEnergy ? preset.sigEnergyRiseMs : preset.sigEnergyFallMs;
 		const sk = 1 - Math.exp(-dtMs / sigTau);
 		sigEnergy = sigEnergy + (targetSig - sigEnergy) * sk;
 
@@ -747,16 +797,17 @@
 			}
 		}
 
-		// Hue smoothing
+		// Hue smoothing - uses mode preset
 		const baseHue = dominant === 'baseline' ? baselineHueTarget : palette[dominant].hue;
-		const hueTau = dominant === 'baseline' ? 14000 : 9000;
+		// Baseline wandering is always slow; channel colors use preset
+		const hueTau = dominant === 'baseline' ? 14000 : preset.hueTauMs;
 		const hk = 1 - Math.exp(-dtMs / hueTau);
 		hueSmooth = hueApproach(hueSmooth, baseHue, hk);
 
-		// Saturation smoothing
-		const satTarget = dominant === 'baseline' ? 52 : dominant === 'pearson' ? 72 : 80;
-		const satTau = 9000;
-		const sk = 1 - Math.exp(-dtMs / satTau);
+		// Saturation smoothing - uses mode preset with saturation boost
+		const baseSat = dominant === 'baseline' ? 52 : dominant === 'pearson' ? 72 : 80;
+		const satTarget = baseSat + preset.saturationBoost;
+		const sk = 1 - Math.exp(-dtMs / preset.satTauMs);
 		satSmooth = satSmooth + (satTarget - satSmooth) * sk;
 
 		if (renderMode === 'orb') {
@@ -949,7 +1000,8 @@
 		const whiten = stage === 1 ? 0 : stage === 2 ? whitenStage2 : whitenStage3;
 
 		const eVis = Math.max(e, 0.08);
-		const brightness = 0.16 + 0.95 * Math.pow(eVis, 0.86);
+		// Apply mode's maxBrightness multiplier
+		const brightness = (0.16 + 0.95 * Math.pow(eVis, 0.86)) * preset.maxBrightness;
 		const orbAlpha = 0.6 + 0.3 * brightness;
 
 		// Orb with clip
@@ -1258,6 +1310,11 @@
 			renderMode = renderMode === 'orb' ? 'signal' : 'orb';
 			return;
 		}
+		// M = toggle light mode (wow/mellow)
+		if (e.key === 'm' || e.key === 'M') {
+			lightMode = lightMode === 'wow' ? 'mellow' : 'wow';
+			return;
+		}
 		// C = cheat: inject fake coherence spike
 		if (e.key === 'c' || e.key === 'C') {
 			cheatBoost = Math.min(1, cheatBoost + 0.6);
@@ -1317,7 +1374,7 @@
 		<section class="hud" aria-label="HUD">
 			<div class="hud-title">
 				<div class="hud-name">Wyrdlight</div>
-				<div class="hud-mode">{renderMode === 'orb' ? 'Orb' : 'Signal'} | Stage {stage}</div>
+				<div class="hud-mode">{lightMode === 'wow' ? 'Wow' : 'Mellow'} | Stage {stage}</div>
 			</div>
 
 			<div class="hud-row">
@@ -1373,6 +1430,14 @@
 				<button
 					class="hud-btn"
 					type="button"
+					onclick={() => (lightMode = lightMode === 'wow' ? 'mellow' : 'wow')}
+					title="Toggle wow/mellow (M)"
+				>
+					{lightMode === 'wow' ? 'Mellow' : 'Wow'}
+				</button>
+				<button
+					class="hud-btn"
+					type="button"
 					onclick={() => (showLegend = !showLegend)}
 					title="Toggle legend (L)"
 				>
@@ -1382,9 +1447,9 @@
 					class="hud-btn"
 					type="button"
 					onclick={() => (renderMode = renderMode === 'orb' ? 'signal' : 'orb')}
-					title="Toggle mode (B)"
+					title="Toggle render (B)"
 				>
-					{renderMode === 'orb' ? 'Signal Mode' : 'Orb Mode'}
+					{renderMode === 'orb' ? 'Signal' : 'Orb'}
 				</button>
 			</div>
 
@@ -1417,8 +1482,8 @@
 			{/if}
 
 			<div class="hint mono">
-				H: HUD &nbsp; B: mode &nbsp; C: cheat &nbsp; R: reset &nbsp; F: fullscreen &nbsp; S:
-				settings &nbsp; L: legend
+				H: HUD &nbsp; M: wow/mellow &nbsp; B: render &nbsp; C: cheat &nbsp; R: reset &nbsp; F:
+				fullscreen &nbsp; S: settings &nbsp; L: legend
 			</div>
 		</section>
 	{/if}
