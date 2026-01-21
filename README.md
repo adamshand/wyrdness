@@ -1,3 +1,5 @@
+<img width="988" height="1031" alt="image" src="https://github.com/user-attachments/assets/89431d98-d1f8-41b4-9f26-c0a202a11bbf" />
+
 # Wyrdness
 
 Wyrdness is a screen-shareable, web-based “lamp” inspired by the [Wyrd Light](https://gowyrd.org/wyrd-light/).
