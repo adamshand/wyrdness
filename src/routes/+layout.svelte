@@ -7,7 +7,7 @@
 <svelte:head>
 	<link rel="icon" href={favicon} />
 	<meta name="theme-color" content="#05060a" />
-	<title>Wyrdlight</title>
+	<title>WyrdWeb</title>
 </svelte:head>
 
 {@render children()}
