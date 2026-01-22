@@ -7,11 +7,10 @@
 		pearsonSpin: number;
 		lightMode: LightMode;
 		responseSpeed: 1 | 2 | 3 | 4 | 5;
-		repoUrl?: string;
 	};
 
-	const { dominant, pearsonSpin, lightMode, responseSpeed, repoUrl }: Props = $props();
-	const resolvedRepoUrl = $derived(repoUrl ?? 'https://github.com/adamshand/wyrdness');
+	const { dominant, pearsonSpin, lightMode, responseSpeed }: Props = $props();
+	const resolvedRepoUrl = 'https://github.com/adamshand/wyrdness';
 </script>
 
 <nav class="bottom-bar" aria-label="Controls">
