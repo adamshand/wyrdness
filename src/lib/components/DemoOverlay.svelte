@@ -8,7 +8,7 @@
 		demoPearsonDir: 1 | -1;
 	};
 
-	const { demoIndex, demoChannel, demoPearsonDir }: Props = $props();
+	let { demoIndex, demoChannel, demoPearsonDir }: Props = $props();
 	const isAnomaly = $derived(demoIndex === DEMO_CHANNELS.length);
 </script>
 

@@ -9,7 +9,7 @@
 		responseSpeed: 1 | 2 | 3 | 4 | 5;
 	};
 
-	const { dominant, pearsonSpin, lightMode, responseSpeed }: Props = $props();
+	let { dominant, pearsonSpin, lightMode, responseSpeed }: Props = $props();
 	const resolvedRepoUrl = 'https://github.com/adamshand/wyrdness';
 </script>
 

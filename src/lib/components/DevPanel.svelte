@@ -18,7 +18,7 @@
 		demoMode: boolean;
 	};
 
-	const {
+	let {
 		dominant,
 		coherence,
 		sigEnergy,

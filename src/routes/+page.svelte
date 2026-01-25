@@ -622,7 +622,6 @@
 			// Smooth envelope: sin²(π * t) peaks at middle, smooth start/end
 			const t = Math.min(1, elapsed / DEMO_DURATION_MS);
 			const envelope = Math.pow(Math.sin(Math.PI * t), 2);
-			const prevEnvelope = demoBoost / 0.85; // Previous envelope value
 
 			if (isAnomalySegment) {
 				// Anomaly segment: baseline color, significance builds up, ring effect once at peak
