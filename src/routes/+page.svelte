@@ -575,12 +575,9 @@
 		let ticks = Math.floor(tickBudget);
 		ticks = Math.min(ticks, 8);
 
-		if (!bootLock && ticks > 0) {
-			tickBudget -= ticks;
-			for (let t = 0; t < ticks; t++) {
-				signalTick();
-			}
-		} else {
+		if (bootLock) {
+			// During boot we intentionally suppress the signal engine and force baseline.
+			// After boot, we *must not* reset state on frames that simply have no tick.
 			tickBudget = Math.min(2, tickBudget);
 			dominant = 'baseline';
 			dominance = 0;
@@ -602,6 +599,15 @@
 				stick: 0,
 				pearson: 0
 			};
+		} else if (ticks > 0) {
+			tickBudget -= ticks;
+			for (let t = 0; t < ticks; t++) {
+				signalTick();
+			}
+		} else {
+			// No signal tick this frame. Keep the last computed state so per-frame
+			// smoothing can do its job (otherwise we'd snap back to baseline ~60fps).
+			tickBudget = Math.min(2, tickBudget);
 		}
 
 		// === Demo Mode Sequencing ===
