@@ -44,6 +44,12 @@ export function twoSidedPFromZ(z: number) {
 	return Math.max(1e-18, Math.min(1, 2 * tail));
 }
 
+// One-sided p-value for positive z (right tail: P(Z > z))
+export function oneSidedPFromZ(z: number) {
+	const tail = 1 - normalCdf(z);
+	return Math.max(1e-18, Math.min(1, tail));
+}
+
 export function zFromOnes(ones: number, N: number) {
 	const E = N / 2;
 	const sd = Math.sqrt(N / 4);

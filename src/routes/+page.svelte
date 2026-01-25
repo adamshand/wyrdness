@@ -12,6 +12,7 @@
 	import {
 		clamp01,
 		hueApproach,
+		oneSidedPFromZ,
 		smoothstep,
 		strengthFromZ,
 		twoSidedPFromZ,
@@ -543,7 +544,8 @@
 		const pCorrLow = corrLowZ !== 0 ? twoSidedPFromZ(corrLowZ) : 1;
 		const pAntiAb = antiAbZ !== 0 ? twoSidedPFromZ(antiAbZ) : 1;
 		const pAntiBa = antiBaZ !== 0 ? twoSidedPFromZ(antiBaZ) : 1;
-		const pStick = stickZ !== 0 ? twoSidedPFromZ(stickZ) : 1;
+		// Stick uses one-sided p-value (only excess agreement matters)
+		const pStick = stickZ > 0 ? oneSidedPFromZ(stickZ) : 1;
 		const pPearson = pearsonZ_seg !== 0 ? twoSidedPFromZ(pearsonZ_seg) : 1;
 
 		const pOverallReal = Math.min(

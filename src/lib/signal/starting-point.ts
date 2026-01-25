@@ -52,7 +52,9 @@ export function findOptimalStartingPointAgreement(
 		// Variance of agreement count over N bits is N/4 (binomial with p=0.5)
 		const z = delta / Math.sqrt(bitSpan / 4);
 
-		if (Math.abs(z) > Math.abs(bestZ)) {
+		// Only consider positive z (more agreement than chance).
+		// Negative z means disagreement, which is not "stick together".
+		if (z > bestZ) {
 			bestZ = z;
 			bestStart = s;
 		}
@@ -90,7 +92,8 @@ export function findOptimalStartingPointPearson(
 		const cov = sumXY / bitSpan - meanX * meanY;
 		const varX = Math.max(1e-6, 1 - meanX * meanX);
 		const varY = Math.max(1e-6, 1 - meanY * meanY);
-		const r = cov / Math.sqrt(varX * varY);
+		// Clamp r to valid [-1, 1] range (can exceed due to variance floor)
+		const r = Math.max(-1, Math.min(1, cov / Math.sqrt(varX * varY)));
 
 		// Fisher z-transformation for significance
 		const rClamped = Math.max(-0.999, Math.min(0.999, r));
