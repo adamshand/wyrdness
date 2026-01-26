@@ -1,6 +1,6 @@
 <img width="360"  alt="image" src="https://github.com/user-attachments/assets/89431d98-d1f8-41b4-9f26-c0a202a11bbf" />
 
-# What Is This?|
+# What Is This?
 
 The Wyrd Web is a reverse engineered, hybrid implementation of the [Wyrd Light](https://gowyrd.org/wyrd-light/) and [Wyrdoscope](https://gowyrd.org/wyrdoscope-device/). 
 
