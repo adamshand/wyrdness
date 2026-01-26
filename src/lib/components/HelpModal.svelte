@@ -11,9 +11,9 @@
 	aria-label="Close help"
 ></div>
 <dialog class="help-modal" open aria-label="Help">
-	<h2>What is Wyrdness?</h2>
+	<h2>What is Wyrd Web?</h2>
 	<p>
-		Wyrdness visualizes patterns in random data. Two streams of random bits (0s and 1s) are
+		Wyrd web visualizes patterns in random data. Two streams of random bits (0s and 1s) are
 		continuously compared, looking for moments when they deviate from pure chance.
 	</p>
 	<p>
@@ -23,11 +23,11 @@
 	<h3>What do the colors mean?</h3>
 	<ul>
 		<li>
-			<strong>Correlated</strong> (cyan/blue) -- Both streams trending the same direction, more than expected
-			by chance.
+			<strong>Correlated</strong> (cyan/ or blue) -- Both streams trending the same direction, more than
+			expected by chance.
 		</li>
 		<li>
-			<strong>Diverging</strong> (orange/coral) -- Streams trending in opposite directions, more than
+			<strong>Diverging</strong> (yellow or red) -- Streams trending in opposite directions, more than
 			expected by chance.
 		</li>
 		<li>
@@ -40,9 +40,17 @@
 
 	<h3>What do the symbols mean?</h3>
 	<ul>
-		<li><strong>&#8593; / &#8595;</strong> -- Direction of the streams (more 1s or more 0s).</li>
-		<li><strong>+ / &#8722;</strong> -- Pearson correlation direction (positive or negative).</li>
-		<li><strong>A&gt;B or B&gt;A</strong> -- One stream has more 1s than the other.</li>
+		<li>
+			<strong>&#8593; / &#8595;</strong> -- Correlated polarity (both streams have more 1s or more 0s).
+		</li>
+		<li>
+			<strong>&#8592; / &#8594;</strong> -- Diverging direction (which stream is higher: A high/B low
+			vs B high/A low).
+		</li>
+		<li>
+			<strong>+ / &#8722;</strong> -- Pearson correlation direction when the swirl is visible (can appear
+			alongside any state).
+		</li>
 	</ul>
 
 	<h3>What does brightness mean?</h3>
@@ -53,16 +61,22 @@
 
 	<h3>What about the swirling effect?</h3>
 	<p>
-		The swirling motion inside the orb shows correlation between the two streams. It spins clockwise
-		for positive correlation (+) and counter-clockwise for negative (&#8722;).
+		The swirling motion inside the orb is a representation of Pearson's correlation coefficient,
+		which shows correlation between the two streams. It spins clockwise for positive correlation (+)
+		and counter-clockwise for negative (&#8722;).
 	</p>
 
 	<h3>Keyboard shortcuts</h3>
 	<ul>
-		<li><strong>M</strong> -- Toggle between Mellow and Wow visual modes</li>
-		<li><strong>S</strong> -- Cycle sensitivity (Conservative / Moderate / Engaging)</li>
-		<li><strong>D</strong> -- Start/stop demo mode</li>
-		<li><strong>L</strong> -- Toggle legend overlay</li>
+		<li>
+			<strong>[M]</strong>ode -- Toggle the visuals between a mellow and more exciting wow mode
+		</li>
+		<li>
+			<strong>[S]</strong>ensitivity -- Choose how often events occur
+		</li>
+		<li><strong>[D]</strong>emo -- Start/stop demo mode</li>
+		<li><strong>[L]</strong>egend -- Toggle legend overlay</li>
+		<li><strong>[`]</strong> Debug -- Show additional debugging information</li>
 	</ul>
 
 	<h3>What is sensitivity?</h3>

@@ -14,11 +14,11 @@
 	</div>
 	<div class="legend-row">
 		<span class="swatch" style={`--h:${palette.anti_ab.hue}`}></span>
-		<span>Diverging A>B -- stream A has more 1s and stream B more 0s than expected</span>
+		<span>Diverging &#8592; -- stream A has more 1s and stream B more 0s than expected</span>
 	</div>
 	<div class="legend-row">
 		<span class="swatch" style={`--h:${palette.anti_ba.hue}`}></span>
-		<span>Diverging B>A -- stream B has more 1s and stream A more 0s than expected</span>
+		<span>Diverging &#8594; -- stream B has more 1s and stream A more 0s than expected</span>
 	</div>
 	<div class="legend-row">
 		<span class="swatch" style={`--h:${palette.stick.hue}`}></span>
