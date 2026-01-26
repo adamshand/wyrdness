@@ -17,7 +17,7 @@ The Wyrd Web app takes two streams of random numbers (zeros and ones) and monito
 Non-random, statistical patterns are represented as a moving, shimmering orb of light. The suggestion from the Wyrdo's is that different patterns represent different group experiences, but so far we don't know how to map them. In theory, groups should be able to learn how to deliberately make the orb change color and rotation.
 
 - ⚫️ Baseline: the streams are bahaving randomly
-- [teal] 🔵 Correlated: both streams are generating more ones (↑) or more zeros (↓) 
+- [cyan] 🔵 Correlated: both streams are generating more ones (↑) or more zeros (↓) 
 - 🟡🔴 Diverging: one stream is generating more ones, and the other stream is generating more zeros 
 - 🟢 Agreement: the streams are generating the exact same sequence of ones and zeros 
 - 🟣 Pearson: the streams are trending together but not matching 
@@ -26,6 +26,10 @@ Non-random, statistical patterns are represented as a moving, shimmering orb of 
 The more the streams are behaving in a statistically unlikely way, the brighter the orb becomes until eventually an anomaly is triggered.
 
 This provides us with seven patterns, each with it's own color.  In addition Pearson can happen at the same time as correlated or diverging patterns and is represented by changes the rotation of the orb.  Your mission, should you choose to accept it, is to figure out how to control the patterns. 🤯 🦄 🤣 
+
+There are two settings you can use to adjust the visual experience:
+- **Mode (wow / mellow)** changes how dynamic the visual representation is.  Mellow might be more appropriate if you are going to have it running in the background for a longer period of time.  Wow might be more appropriate if you are actively watching and experimenting with it.
+- **Sensitivity (conservative / moderate / engaging)** changes how statistically significant an event must be to show up. So in conservative mode you might only get an event every ten minutes, in moderate every three minutes, and engaging every minute.
 
 As always, feedback welcome. 💬
 
