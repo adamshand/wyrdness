@@ -9,6 +9,8 @@ export type Channel =
 
 export type LightMode = 'wow' | 'mellow';
 
+export type Sensitivity = 'conservative' | 'moderate' | 'engaging';
+
 export type ModePreset = {
 	// Smoothing time constants (ms)
 	sigEnergyRiseMs: number;

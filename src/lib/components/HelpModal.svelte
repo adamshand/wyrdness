@@ -57,6 +57,27 @@
 		for positive correlation (+) and counter-clockwise for negative (&#8722;).
 	</p>
 
+	<h3>Keyboard shortcuts</h3>
+	<ul>
+		<li><strong>M</strong> -- Toggle between Mellow and Wow visual modes</li>
+		<li><strong>S</strong> -- Cycle sensitivity (Conservative / Moderate / Engaging)</li>
+		<li><strong>D</strong> -- Start/stop demo mode</li>
+		<li><strong>L</strong> -- Toggle legend overlay</li>
+	</ul>
+
+	<h3>What is sensitivity?</h3>
+	<p>Sensitivity controls how often patterns appear under pure randomness:</p>
+	<ul>
+		<li>
+			<strong>Conservative</strong> -- Rare events (~1 per 10 min). When something appears, it's genuinely
+			unusual.
+		</li>
+		<li><strong>Moderate</strong> -- Balanced (~1 per 3 min). Good for most sessions.</li>
+		<li>
+			<strong>Engaging</strong> -- More frequent (~1 per min). Good for demos and active exploration.
+		</li>
+	</ul>
+
 	<h3>Why does this matter?</h3>
 	<p>
 		Some researchers explore whether group intention or focused attention can influence random

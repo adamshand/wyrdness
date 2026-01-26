@@ -1,23 +1,29 @@
 <script lang="ts">
-	import type { Channel, LightMode } from '$lib/signal/types';
+	import type { Channel, LightMode, Sensitivity } from '$lib/signal/types';
 	import { DISPLAY_NAMES, getDirectionArrow, getPearsonIndicator } from '$lib/palette';
 
 	type Props = {
 		dominant: Channel;
 		pearsonSpin: number;
 		lightMode: LightMode;
-		responseSpeed: 1 | 2 | 3 | 4 | 5;
+		sensitivity: Sensitivity;
 	};
 
-	let { dominant, pearsonSpin, lightMode, responseSpeed }: Props = $props();
+	let { dominant, pearsonSpin, lightMode, sensitivity }: Props = $props();
 	const resolvedRepoUrl = 'https://github.com/adamshand/wyrdness';
+
+	const SENSITIVITY_LABELS: Record<Sensitivity, string> = {
+		conservative: 'Conservative',
+		moderate: 'Moderate',
+		engaging: 'Engaging'
+	};
 </script>
 
 <nav class="bottom-bar" aria-label="Controls">
 	<div class="bar-left">
 		<span class="shortcut"><b>?</b> help</span>
 		<span class="shortcut"><b>M</b> mode</span>
-		<span class="shortcut"><b>1-5</b> speed</span>
+		<span class="shortcut"><b>S</b> sensitivity</span>
 		<span class="shortcut"><b>D</b> demo</span>
 		<span class="shortcut"><b>L</b> legend</span>
 		<span class="shortcut"><b>`</b> debug</span>
@@ -30,7 +36,9 @@
 		>
 	</div>
 	<div class="bar-right">
-		<span class="mode-info">{lightMode === 'wow' ? 'Wow' : 'Mellow'} {responseSpeed}</span>
+		<span class="mode-info"
+			>{lightMode === 'wow' ? 'Wow' : 'Mellow'} / {SENSITIVITY_LABELS[sensitivity]}</span
+		>
 		<b>WyrdWeb</b>
 		<a
 			title="Github Repository"

@@ -61,18 +61,39 @@ Dominant channels (`Channel`):
 Starting points:
 
 - For each tick, we search backwards up to `MAX_LOOKBACK` ticks and choose the start index that maximizes a z-score-like statistic for that channel.
+- `findOptimalStartingPointCorrelated()` and `findOptimalStartingPointAnti()` do joint searches over both streams, finding windows where both streams are deviating in the required direction simultaneously. This gives all channels a fair chance (previously correlated/anti were handicapped).
+- `findOptimalStartingPointAgreement()` searches for excess bit-by-bit agreement (one-sided, only positive z counts).
+- `findOptimalStartingPointPearson()` searches for correlation using Fisher z-transformation.
 
 Strength mapping:
 
-- Most channels map a segment z-score through `STRENGTH_Z_START` → `STRENGTH_Z_FULL` to produce a 0..1 strength.
-- `stick` uses higher thresholds (`STICK_Z_START`, `STICK_Z_FULL`).
-- `pearson` channel strength is derived from `|r|` through `PEARSON_R_START` → `PEARSON_R_FULL`.
+- Channel strength thresholds are now controlled by the **sensitivity** setting (see below).
+- Each channel maps its z-score through `zStart` → `zFull` to produce a 0..1 strength.
+- Thresholds are calibrated to the null distribution of "max z over ~120 windows".
+
+## Sensitivity
+
+Controls how often non-baseline events occur under pure randomness:
+
+- `conservative`: Higher thresholds, rare events. Best for long sessions where significance should be meaningful.
+- `moderate` (default): Balanced thresholds. Good for most group sessions.
+- `engaging`: Lower thresholds, more frequent activity. Good for demos and active exploration.
+
+Each sensitivity level sets different z-score thresholds for channel detection:
+
+| Sensitivity  | strengthZStart | stickZStart | Effect                  |
+| ------------ | -------------- | ----------- | ----------------------- |
+| conservative | 2.4            | 3.4         | Rare channel activation |
+| moderate     | 2.0            | 2.9         | Balanced                |
+| engaging     | 1.7            | 2.6         | Frequent activity       |
+
+Hotkey: `S` cycles through sensitivity levels.
 
 ## Dominant Channel Selection
 
 We pick a `dominant` channel (winner-takes-most + hysteresis) to choose the base hue:
 
-- `DOMINANCE_THRESHOLD` (0.15): minimum strength to leave baseline
+- `dominanceThreshold` (from sensitivity preset): minimum strength to leave baseline
 - `switchMargin` + `keepBonus`: mode-dependent hysteresis (from `preset`)
 - `dominance`: smoothed with asymmetric tau (1200ms rise, 1800ms fall)
 
@@ -91,9 +112,14 @@ Palette (hues):
 - `coherence` = max channel strength (including Pearson)
 - `sigEnergy` = p-value-based significance energy (drives brightness)
   - compute per-channel p-values from segment z-scores
-  - `pOverall = min(COHERENCE_FLOOR, pCorrHigh, pCorrLow, pAntiAb, pAntiBa, pStick, pPearson)`
+  - apply empirical calibration to correct for max-over-windows bias:
+    - stick: divide by `P_NULL_STICK = 0.05` (empirical median under null)
+    - pearson: divide by `P_NULL_PEARSON = 0.016` (empirical median under null)
+    - corr/anti: no correction needed (already well-calibrated)
+  - take min across all channels, then divide by `P_NULL_MIN6 = 0.11` (expected median of min(6 uniform))
+  - cap at `COHERENCE_FLOOR = 0.35`
   - surprisal transform: `S = -log10(pOverall)`
-  - map to 0..1 and smooth with mode preset (`sigEnergyRiseMs`, `sigEnergyFallMs`)
+  - map to 0..1 with `targetSig = clamp01((S - 0.3) / 5.0)` and smooth with mode preset
 
 ## Visual Model
 
@@ -106,7 +132,7 @@ Palette (hues):
 
 ## HUD + Controls
 
-Bottom bar shows shortcuts, current state, and mode/speed.
+Bottom bar shows shortcuts, current state, mode, and sensitivity.
 
 Hotkeys:
 
@@ -114,7 +140,7 @@ Hotkeys:
 - `L` toggle legend
 - `` ` `` toggle dev/debug panel
 - `M` toggle mode (Wow/Mellow)
-- `1-5` set response speed
+- `S` cycle sensitivity (Conservative/Moderate/Engaging)
 - `D` toggle demo mode
 - `Escape` close modals / stop demo
 
@@ -139,7 +165,7 @@ Chunk sizes: start with 64KB or 256KB per request.
 If you need to adjust feel, try in this order:
 
 1. `sampleBits` and `updatesPerSec`
-2. `sigEnergy` rise/fall time constants (via presets + speed)
+2. `sigEnergy` rise/fall time constants (via presets)
 3. channel thresholds (`STRENGTH_Z_START`, `STRENGTH_Z_FULL`, stick thresholds, Pearson thresholds)
 4. dominance hysteresis (`switchMargin`, `keepBonus`)
 5. purely visual parameters in `renderOrb()`

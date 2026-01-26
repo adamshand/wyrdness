@@ -21,9 +21,17 @@
 	import {
 		findOptimalStartingPoint,
 		findOptimalStartingPointAgreement,
+		findOptimalStartingPointAnti,
+		findOptimalStartingPointCorrelated,
 		findOptimalStartingPointPearson
 	} from '$lib/signal/starting-point';
-	import type { Channel, EpisodeState, LightMode, ModePreset } from '$lib/signal/types';
+	import type {
+		Channel,
+		EpisodeState,
+		LightMode,
+		ModePreset,
+		Sensitivity
+	} from '$lib/signal/types';
 
 	const MODE_PRESETS: Record<LightMode, ModePreset> = {
 		wow: {
@@ -58,42 +66,69 @@
 	let showDev = $state(false);
 
 	let lightMode = $state<LightMode>('mellow'); // default to mellow for calmer experience
-	let responseSpeed = $state<1 | 2 | 3 | 4 | 5>(3); // 1=slowest, 5=fastest, 3=default
+	let sensitivity = $state<Sensitivity>('moderate'); // default to moderate
 
-	// Speed multipliers: speed 3 is baseline (1.0x), speed 1 is slower, speed 5 is faster
-	const SPEED_MULTIPLIERS: Record<1 | 2 | 3 | 4 | 5, number> = {
-		1: 1.8, // slowest - 1.8x tau (slower response)
-		2: 1.35,
-		3: 1.0, // baseline
-		4: 0.7,
-		5: 0.45 // fastest - 0.45x tau (faster response)
-	};
-
-	// Derived preset from current mode, with speed applied
-	const basePreset = $derived(MODE_PRESETS[lightMode]);
-	const speedMult = $derived(SPEED_MULTIPLIERS[responseSpeed]);
-	const preset = $derived({
-		...basePreset,
-		sigEnergyRiseMs: basePreset.sigEnergyRiseMs * speedMult,
-		sigEnergyFallMs: basePreset.sigEnergyFallMs * speedMult,
-		hueTauMs: basePreset.hueTauMs * speedMult,
-		satTauMs: basePreset.satTauMs * speedMult
-	});
+	// Derived preset from current mode
+	const preset = $derived(MODE_PRESETS[lightMode]);
 
 	// === Signal Engine Config ===
 	// 200-bit samples at 1Hz matches Wyrd's description
 	let sampleBits = $state(200);
 	let updatesPerSec = $state(1);
 
-	// === Thresholds (tuned for ~5-10 min episode frequency) ===
-	// These control how "hard" it is to trigger a visible episode
-	const STRENGTH_Z_START = 1.8; // z-score where channel strength begins
-	const STRENGTH_Z_FULL = 3.5; // z-score for full channel strength
-	const STICK_Z_START = 2.2; // stick is rarer
-	const STICK_Z_FULL = 3.8;
-	const PEARSON_R_START = 0.18; // |r| threshold to start showing pearson
-	const PEARSON_R_FULL = 0.45; // |r| for full pearson strength
-	const DOMINANCE_THRESHOLD = 0.15; // min strength to leave baseline
+	// === Sensitivity Presets ===
+	// These control how often events occur under pure randomness.
+	// Thresholds are calibrated to the null distribution of max-over-windows z-scores.
+	// Conservative: ~1 event per 10 min, Moderate: ~1 per 3 min, Engaging: ~1 per min
+	type SensitivityPreset = {
+		strengthZStart: number; // z-score where correlated/anti channel strength begins
+		strengthZFull: number; // z-score for full channel strength
+		stickZStart: number; // z-score where agreement strength begins
+		stickZFull: number; // z-score for full agreement strength
+		pearsonRStart: number; // |r| threshold to start showing pearson
+		pearsonRFull: number; // |r| for full pearson strength
+		dominanceThreshold: number; // min strength to leave baseline
+	};
+
+	const SENSITIVITY_PRESETS: Record<Sensitivity, SensitivityPreset> = {
+		conservative: {
+			// Rare events (~1 per 10 min) - only truly unusual patterns trigger
+			// Corr/Anti: P99.5 ≈ 2.4, Stick: P99.5 ≈ 3.4
+			strengthZStart: 2.4,
+			strengthZFull: 3.5,
+			stickZStart: 3.4,
+			stickZFull: 4.5,
+			pearsonRStart: 0.25,
+			pearsonRFull: 0.5,
+			dominanceThreshold: 0.12
+		},
+		moderate: {
+			// Occasional events (~1 per 3 min) - balanced
+			// Corr/Anti: P98 ≈ 2.0, Stick: P98 ≈ 2.9
+			strengthZStart: 2.0,
+			strengthZFull: 3.2,
+			stickZStart: 2.9,
+			stickZFull: 4.0,
+			pearsonRStart: 0.2,
+			pearsonRFull: 0.45,
+			dominanceThreshold: 0.12
+		},
+		engaging: {
+			// More frequent events (~1 per min) - good for demos
+			// Corr/Anti: P95 ≈ 1.7, Stick: P95 ≈ 2.6
+			strengthZStart: 1.7,
+			strengthZFull: 3.0,
+			stickZStart: 2.6,
+			stickZFull: 3.8,
+			pearsonRStart: 0.16,
+			pearsonRFull: 0.4,
+			dominanceThreshold: 0.1
+		}
+	};
+
+	const sensitivityPreset = $derived(SENSITIVITY_PRESETS[sensitivity]);
+
+	// Fixed constants (not affected by sensitivity)
 	const COHERENCE_FLOOR = 0.35; // p-value floor for aesthetic minimum
 
 	// === Cumulative Deviation / Starting Point Config ===
@@ -289,7 +324,11 @@
 		}
 	}
 
-	function strengthFromZLocal(z: number, zStart = STRENGTH_Z_START, zFull = STRENGTH_Z_FULL) {
+	function strengthFromZLocal(
+		z: number,
+		zStart = sensitivityPreset.strengthZStart,
+		zFull = sensitivityPreset.strengthZFull
+	) {
 		return strengthFromZ(z, zStart, zFull);
 	}
 
@@ -304,7 +343,7 @@
 			}
 		}
 
-		const next: Channel = bestV > DOMINANCE_THRESHOLD && best ? best : 'baseline';
+		const next: Channel = bestV > sensitivityPreset.dominanceThreshold && best ? best : 'baseline';
 		const nextStrength = next === 'baseline' ? 0 : bestV;
 
 		// Use preset values for mode-dependent behavior
@@ -363,9 +402,35 @@
 
 		// === Find optimal starting points for each channel ===
 
-		// Stream A and B individually (for correlated/anti detection)
+		// Stream A and B individually (still needed for smoothed stats)
 		const spA = findOptimalStartingPoint(cumSumA, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
 		const spB = findOptimalStartingPoint(cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
+
+		// Correlated channels (joint search for both streams deviating same direction)
+		const spCorr = findOptimalStartingPointCorrelated(
+			cumSumA,
+			cumSumB,
+			currentIdx,
+			N,
+			MAX_LOOKBACK,
+			MIN_SEGMENT_LEN
+		);
+		const corrHighZ = spCorr.highZ;
+		const corrLowZ = spCorr.lowZ;
+		const corrStart = Math.min(spCorr.highStart, spCorr.lowStart);
+
+		// Anti-correlated channels (joint search for streams deviating opposite directions)
+		const spAnti = findOptimalStartingPointAnti(
+			cumSumA,
+			cumSumB,
+			currentIdx,
+			N,
+			MAX_LOOKBACK,
+			MIN_SEGMENT_LEN
+		);
+		const antiAbZ = spAnti.abZ;
+		const antiBaZ = spAnti.baZ;
+		const antiStart = Math.min(spAnti.abStart, spAnti.baStart);
 
 		// Agreement channel
 		const spAgree = findOptimalStartingPointAgreement(
@@ -375,6 +440,8 @@
 			MAX_LOOKBACK,
 			MIN_SEGMENT_LEN
 		);
+		const stickZ = spAgree.z;
+		const stickStart = spAgree.startIdx;
 
 		// Pearson channel
 		const spPearson = findOptimalStartingPointPearson(
@@ -387,63 +454,6 @@
 			MIN_SEGMENT_LEN
 		);
 
-		// === Compute channel strengths from segments ===
-		// Now with directional channels: correlated_high, correlated_low, anti_ab, anti_ba
-
-		// Correlated: both streams deviate in same direction
-		let corrHighZ = 0;
-		let corrLowZ = 0;
-		let corrStart = currentIdx;
-		if (spA.z * spB.z > 0) {
-			// Same sign - correlated
-			const commonStart = Math.max(spA.startIdx, spB.startIdx);
-			const tickSpan = currentIdx - commonStart;
-			if (tickSpan >= MIN_SEGMENT_LEN) {
-				const bitSpan = tickSpan * N;
-				const deltaA = (cumSumA[currentIdx] ?? 0) - (cumSumA[commonStart] ?? 0);
-				const deltaB = (cumSumB[currentIdx] ?? 0) - (cumSumB[commonStart] ?? 0);
-				const zA_seg = deltaA / Math.sqrt(bitSpan);
-				const zB_seg = deltaB / Math.sqrt(bitSpan);
-				// Strength is the weaker of the two
-				const strength = Math.min(Math.abs(zA_seg), Math.abs(zB_seg));
-				if (zA_seg > 0 && zB_seg > 0) {
-					corrHighZ = strength; // Both toward 1s
-				} else {
-					corrLowZ = strength; // Both toward 0s
-				}
-				corrStart = commonStart;
-			}
-		}
-
-		// Anti-correlated: streams deviate in opposite directions
-		let antiAbZ = 0; // A high, B low
-		let antiBaZ = 0; // B high, A low
-		let antiStart = currentIdx;
-		if (spA.z * spB.z < 0) {
-			// Opposite sign - anti-correlated
-			const commonStart = Math.max(spA.startIdx, spB.startIdx);
-			const tickSpan = currentIdx - commonStart;
-			if (tickSpan >= MIN_SEGMENT_LEN) {
-				const bitSpan = tickSpan * N;
-				const deltaA = (cumSumA[currentIdx] ?? 0) - (cumSumA[commonStart] ?? 0);
-				const deltaB = (cumSumB[currentIdx] ?? 0) - (cumSumB[commonStart] ?? 0);
-				const zA_seg = deltaA / Math.sqrt(bitSpan);
-				const zB_seg = deltaB / Math.sqrt(bitSpan);
-				// Strength is the weaker magnitude
-				const strength = Math.min(Math.abs(zA_seg), Math.abs(zB_seg));
-				if (zA_seg > 0 && zB_seg < 0) {
-					antiAbZ = strength; // A high, B low
-				} else {
-					antiBaZ = strength; // B high, A low
-				}
-				antiStart = commonStart;
-			}
-		}
-
-		// Stick together
-		const stickZ = spAgree.z;
-		const stickStart = spAgree.startIdx;
-
 		// Pearson (for visual effect only, not a competing channel)
 		const pearsonZ_seg = spPearson.z;
 		const pearsonR_seg = spPearson.r;
@@ -453,7 +463,11 @@
 		const corrLowRaw = strengthFromZLocal(corrLowZ);
 		const antiAbRaw = strengthFromZLocal(antiAbZ);
 		const antiBaRaw = strengthFromZLocal(antiBaZ);
-		const stickRaw = strengthFromZLocal(stickZ, STICK_Z_START, STICK_Z_FULL);
+		const stickRaw = strengthFromZLocal(
+			stickZ,
+			sensitivityPreset.stickZStart,
+			sensitivityPreset.stickZFull
+		);
 
 		// === Update episode states ===
 		const EPISODE_DECAY_THRESHOLD = 0.8;
@@ -483,7 +497,11 @@
 			}
 
 			const effectiveZ = ep.peakZ > EPISODE_Z_THRESHOLD ? Math.max(absZ, ep.peakZ * 0.7) : absZ;
-			ep.strength = strengthFromZLocal(effectiveZ, STRENGTH_Z_START, STRENGTH_Z_FULL);
+			ep.strength = strengthFromZLocal(
+				effectiveZ,
+				sensitivityPreset.strengthZStart,
+				sensitivityPreset.strengthZFull
+			);
 		}
 
 		updateEpisode('correlated_high', corrHighZ, corrStart);
@@ -504,7 +522,8 @@
 
 		// Pearson channel strength (0..1) derived from |r|
 		const pearsonRaw = clamp01(
-			(Math.abs(pearsonR_seg) - PEARSON_R_START) / (PEARSON_R_FULL - PEARSON_R_START)
+			(Math.abs(pearsonR_seg) - sensitivityPreset.pearsonRStart) /
+				(sensitivityPreset.pearsonRFull - sensitivityPreset.pearsonRStart)
 		);
 
 		// Build raw channel strengths with demo boost applied
@@ -539,28 +558,47 @@
 		}
 
 		// Significance energy (p-value based)
+		// Raw p-values from z-scores
 		const dtMs = 1000 / Math.max(0.25, updatesPerSec);
-		const pCorrHigh = corrHighZ !== 0 ? twoSidedPFromZ(corrHighZ) : 1;
-		const pCorrLow = corrLowZ !== 0 ? twoSidedPFromZ(corrLowZ) : 1;
-		const pAntiAb = antiAbZ !== 0 ? twoSidedPFromZ(antiAbZ) : 1;
-		const pAntiBa = antiBaZ !== 0 ? twoSidedPFromZ(antiBaZ) : 1;
+		const pCorrHighRaw = corrHighZ !== 0 ? twoSidedPFromZ(corrHighZ) : 1;
+		const pCorrLowRaw = corrLowZ !== 0 ? twoSidedPFromZ(corrLowZ) : 1;
+		const pAntiAbRaw = antiAbZ !== 0 ? twoSidedPFromZ(antiAbZ) : 1;
+		const pAntiBaRaw = antiBaZ !== 0 ? twoSidedPFromZ(antiBaZ) : 1;
 		// Stick uses one-sided p-value (only excess agreement matters)
-		const pStick = stickZ > 0 ? oneSidedPFromZ(stickZ) : 1;
-		const pPearson = pearsonZ_seg !== 0 ? twoSidedPFromZ(pearsonZ_seg) : 1;
+		const pStickRaw = stickZ > 0 ? oneSidedPFromZ(stickZ) : 1;
+		const pPearsonRaw = pearsonZ_seg !== 0 ? twoSidedPFromZ(pearsonZ_seg) : 1;
 
-		const pOverallReal = Math.min(
-			COHERENCE_FLOOR,
-			pCorrHigh,
-			pCorrLow,
-			pAntiAb,
-			pAntiBa,
-			pStick,
-			pPearson
-		);
+		// Empirical calibration: divide by median p under null to get calibrated p-values
+		// Under null, calibrated p should have median ~0.5 (properly uniform)
+		// Corr/Anti channels are already well-calibrated (median ~0.5)
+		// Stick and Pearson need correction due to max-over-windows search
+		const P_NULL_STICK = 0.05; // empirical median p for stick under null
+		const P_NULL_PEARSON = 0.016; // empirical median p for pearson under null
+
+		const pCorrHigh = pCorrHighRaw;
+		const pCorrLow = pCorrLowRaw;
+		const pAntiAb = pAntiAbRaw;
+		const pAntiBa = pAntiBaRaw;
+		const pStick = Math.min(1, pStickRaw / P_NULL_STICK);
+		const pPearson = Math.min(1, pPearsonRaw / P_NULL_PEARSON);
+
+		// Take minimum across all channels
+		const pMinRaw = Math.min(pCorrHigh, pCorrLow, pAntiAb, pAntiBa, pStick, pPearson);
+
+		// Calibrate for multiple comparisons: with 6 channels, the expected median
+		// of min(6 uniform p-values) is ~0.11. Divide by this to get calibrated p.
+		const P_NULL_MIN6 = 0.11;
+		const pOverallCalibrated = Math.min(1, pMinRaw / P_NULL_MIN6);
+
+		// Apply demo boost and coherence floor
+		const pOverallReal = Math.min(COHERENCE_FLOOR, pOverallCalibrated);
 		const pOverall =
 			demoBoost > 0.05 ? Math.min(pOverallReal, 0.001 * (1 - demoBoost)) : pOverallReal;
+
+		// Convert to surprisal and sigEnergy
+		// With calibration, pOverall ~0.5 under null, so surprisal ~0.3, targetSig ~0
 		const surprisal = Math.min(6, -Math.log10(pOverall));
-		const targetSig = clamp01((surprisal - 0.8) / 4.8);
+		const targetSig = clamp01((surprisal - 0.3) / 5.0);
 
 		const sigTau = targetSig > sigEnergy ? preset.sigEnergyRiseMs : preset.sigEnergyFallMs;
 		const sk = 1 - Math.exp(-dtMs / sigTau);
@@ -1146,11 +1184,14 @@
 			lightMode = lightMode === 'wow' ? 'mellow' : 'wow';
 			return;
 		}
-		// 1-5 = set response speed
-		if (e.key >= '1' && e.key <= '5') {
-			responseSpeed = parseInt(e.key) as 1 | 2 | 3 | 4 | 5;
+		// S = cycle sensitivity (conservative -> moderate -> engaging -> conservative)
+		if (e.key === 's' || e.key === 'S') {
+			const order: Sensitivity[] = ['conservative', 'moderate', 'engaging'];
+			const idx = order.indexOf(sensitivity);
+			sensitivity = order[(idx + 1) % order.length];
 			return;
 		}
+
 		// D = toggle demo mode (auto-cycling showcase)
 		if (e.key === 'd' || e.key === 'D') {
 			if (demoMode) {
@@ -1232,7 +1273,7 @@
 	<canvas bind:this={canvasEl} class="lamp" aria-label="Wyrdness visual"></canvas>
 
 	<!-- Bottom bar HUD (always visible) -->
-	<BottomBar {dominant} {pearsonSpin} {lightMode} {responseSpeed} />
+	<BottomBar {dominant} {pearsonSpin} {lightMode} {sensitivity} />
 
 	<!-- Legend overlay (top-right) -->
 	{#if showLegend}

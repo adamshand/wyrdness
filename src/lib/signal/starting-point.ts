@@ -63,6 +63,106 @@ export function findOptimalStartingPointAgreement(
 	return { startIdx: bestStart, z: bestZ };
 }
 
+/**
+ * Joint search for correlated channels (both streams deviating in same direction).
+ * Returns the best starting point for correlated_high (both positive) and correlated_low (both negative).
+ */
+export function findOptimalStartingPointCorrelated(
+	cumSumA: number[],
+	cumSumB: number[],
+	currentIdx: number,
+	bitsPerTick: number,
+	lookback: number,
+	minLen: number
+): { highZ: number; highStart: number; lowZ: number; lowStart: number } {
+	let bestHighZ = 0;
+	let bestLowZ = 0;
+	let bestHighStart = currentIdx;
+	let bestLowStart = currentIdx;
+
+	const searchStart = Math.max(0, currentIdx - lookback);
+
+	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
+		const tickSpan = currentIdx - s;
+		const bitSpan = tickSpan * bitsPerTick;
+
+		const deltaA = (cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0);
+		const deltaB = (cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0);
+		const zA = deltaA / Math.sqrt(bitSpan);
+		const zB = deltaB / Math.sqrt(bitSpan);
+
+		// Correlated high: both positive (both streams trending toward 1s)
+		if (zA > 0 && zB > 0) {
+			const strength = Math.min(zA, zB);
+			if (strength > bestHighZ) {
+				bestHighZ = strength;
+				bestHighStart = s;
+			}
+		}
+
+		// Correlated low: both negative (both streams trending toward 0s)
+		if (zA < 0 && zB < 0) {
+			const strength = Math.min(-zA, -zB);
+			if (strength > bestLowZ) {
+				bestLowZ = strength;
+				bestLowStart = s;
+			}
+		}
+	}
+
+	return { highZ: bestHighZ, highStart: bestHighStart, lowZ: bestLowZ, lowStart: bestLowStart };
+}
+
+/**
+ * Joint search for anti-correlated channels (streams deviating in opposite directions).
+ * Returns the best starting point for anti_ab (A high, B low) and anti_ba (B high, A low).
+ */
+export function findOptimalStartingPointAnti(
+	cumSumA: number[],
+	cumSumB: number[],
+	currentIdx: number,
+	bitsPerTick: number,
+	lookback: number,
+	minLen: number
+): { abZ: number; abStart: number; baZ: number; baStart: number } {
+	let bestAbZ = 0;
+	let bestBaZ = 0;
+	let bestAbStart = currentIdx;
+	let bestBaStart = currentIdx;
+
+	const searchStart = Math.max(0, currentIdx - lookback);
+
+	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
+		const tickSpan = currentIdx - s;
+		const bitSpan = tickSpan * bitsPerTick;
+
+		const deltaA = (cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0);
+		const deltaB = (cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0);
+		const zA = deltaA / Math.sqrt(bitSpan);
+		const zB = deltaB / Math.sqrt(bitSpan);
+
+		// Anti AB: A positive (toward 1s), B negative (toward 0s)
+		if (zA > 0 && zB < 0) {
+			const strength = Math.min(zA, -zB);
+			if (strength > bestAbZ) {
+				bestAbZ = strength;
+				bestAbStart = s;
+			}
+		}
+
+		// Anti BA: B positive (toward 1s), A negative (toward 0s)
+		if (zA < 0 && zB > 0) {
+			const strength = Math.min(-zA, zB);
+			if (strength > bestBaZ) {
+				bestBaZ = strength;
+				bestBaStart = s;
+			}
+		}
+	}
+
+	return { abZ: bestAbZ, abStart: bestAbStart, baZ: bestBaZ, baStart: bestBaStart };
+}
+
 export function findOptimalStartingPointPearson(
 	cumSumXY: number[],
 	cumSumA: number[],
