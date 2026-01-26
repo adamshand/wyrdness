@@ -12,7 +12,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
-		"deployprod": "caprover deploy -h https://captain.ruru.haume.nz -a wyrdness -b main -p $( awk -F= '/^CAPROVER_PASS=/ {print $2}' ~/.env )"
+		"deployprod": "caprover deploy -h https://captain.ruru.haume.nz -a wyrdweb -b main -p $( awk -F= '/^CAPROVER_PASS=/ {print $2}' ~/.env )"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.4.0",
