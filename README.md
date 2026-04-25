@@ -12,11 +12,11 @@ Try it here: https://wyrdweb.adam.nz/
 >
 > https://gowyrd.org/faq/
 
-The Wyrd Web app takes two streams of random numbers (zeros and ones) and monitors them for trends that deviate from expected randomness (eg. they start matching each other). It can be displayed on a large TV or screen shared on a video conference, providing groups with an easy and fun way to experiment with collective intention and receive immediate, visual feedback on their efforts.
+The Wyrd Web app takes two streams of random numbers (zeros and ones) and monitors them for trends that deviate from expected randomness (eg. they start matching each other). It can be displayed on a large TV or screen shared on a video conference, providing groups with an easy and fun way to experiment with collective intention and receive immediate, visual feedback on the session.
 
 Non-random, statistical patterns are represented as a moving, shimmering orb of light. Wyrd now publicly documents that its lamp colours are associated with data structures, not universal meanings. The fun research question is what kinds of individual or group experiences seem to invite those different structures.
 
-Target Orb Colors (Wyrd-aligned):
+Target Orb Colors (Wyrd-aligned; current code is being refactored toward this):
 
 - ⚫️ Baseline: no pattern is strong enough to dominate; should remain dim and slowly wander through colour
 - 🔴 Parallel / correlated: the two streams drift in the same direction

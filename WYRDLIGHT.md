@@ -2,7 +2,7 @@
 
 This document collects everything we can (publicly) infer about how **Wyrd Light** and **Wyrdoscope** work.
 
-Goal: enable future implementations to emulate the _behavior_ and _visual grammar_ of the official devices as closely as possible, while being clear about what is confirmed vs inferred.
+Goal: enable future implementations to emulate the _behavior_ and _visual grammar_ of the official devices as closely as is useful for WyrdWeb, while being clear about what is confirmed vs inferred. WyrdWeb is not intended to be a perfect clone: we intentionally adapt some behavior for web UX, screen sharing, and safety.
 
 ## Scope and Constraints
 
@@ -136,7 +136,8 @@ Status note (2026-04-25): the public Wyrd FAQ now links an official colour/chann
   - https://gowyrd.org/wp-content/uploads/2024/12/Wyrd-Light-User-Guide-V1.pdf
 
 - Stages / visual escalation:
-  - The User Guide describes three stages: Stage 1 = colours fluctuate/increase in brightness; Stage 2 = white light/whitening increases; Stage 3 = rainbow effect / full spectrum.
+  - The User Guide first gives a generic summary of three stages, with Stage 3 described as a swirling rainbow effect.
+  - Later, in the Wyrd App settings section, it says the stages differ by mode.
   - In Mellow mode: Stage 1 colours brighten; Stage 2 colours move toward white; Stage 3 unlocks a rainbow effect.
   - In Wow mode: Stage 1 colours brighten; Stage 2 increases swirling of the strongest colour; Stage 3 unlocks a white strobe effect with an epilepsy warning.
   - Source: Wyrd Light User Guide.
@@ -535,7 +536,7 @@ Source basis:
 Confirmed / observed:
 
 - "builds towards increasing brightness" is an explicit user instruction, suggesting episodes rather than instantaneous flashes.
-- The Wyrd Light User Guide describes three visual stages:
+- The Wyrd Light User Guide describes three visual stages. Its early technical summary describes Stage 3 generically as a swirling rainbow effect; the later app settings section clarifies that Stage 3 differs by mode:
   - Stage 1: colours increase/fluctuate in brightness.
   - Stage 2: colours move toward white light.
   - Stage 3: rainbow/full spectrum in Mellow; white strobe in Wow with seizure warning.
@@ -581,7 +582,7 @@ Source: https://gowyrd.org/faq/
 - Light is dim when random; bright when statistically significant.
 - Colors are "playfully assigned" to data structures.
 - There are channels, p-values, starting points, and an algorithm selecting 200-bit samples.
-- The Wyrd Light uses stored data but behaves like live RNG.
+- The Wyrd Light uses stored data, and Wyrd reports that their double-blind comparison found no difference in significance or time precision versus live REG data.
 
 Sources:
 
@@ -633,7 +634,8 @@ Wyrd's mention of:
 
 - Input:
   - two bit streams A/B
-  - per tick (1Hz): choose 200-bit segments from each
+  - default/base live cadence: choose 200-bit segments from each at about 1Hz
+  - future response-speed support may apply/update values every 1-5 seconds, matching Wyrd's app setting
 - Per tick:
   - compute per-channel test statistics
   - apply segmentation to detect start points and peak heights
@@ -647,7 +649,8 @@ Wyrd's mention of:
 
 Source basis:
 
-- 200-bit sampling and "p-values each second": https://gowyrd.org/faq/
+- 200-bit sampling and base "p-values each second": https://gowyrd.org/faq/
+- 1-5 second response speed: Wyrd Light User Guide PDF
 - starting points: https://gowyrd.org/faq/
 
 ### Channel implementation hints
