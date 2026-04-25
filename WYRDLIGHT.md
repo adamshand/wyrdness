@@ -6,6 +6,8 @@ Goal: enable future implementations to emulate the _behavior_ and _visual gramma
 
 ## Scope and Constraints
 
+Status note (2026-04-25): the public Wyrd FAQ now links an official colour/channel PDF. This document has been updated to treat the red/amber/blue/green mapping as confirmed public information. The code may temporarily lag behind these notes until the next implementation refactor.
+
 - This is a reverse-engineering guide based on public statements and observable product media.
 - The Wyrdoscope/Wyrd Light analysis software is described as **patented** (patent applications EPA 22814436.6 and USA 18/726,129). We do **not** have the algorithm.
 - We separate:
@@ -15,8 +17,11 @@ Goal: enable future implementations to emulate the _behavior_ and _visual gramma
 
 ## Primary Sources (Cited)
 
-- Wyrd FAQ (detailed technical-ish descriptions, channels, sampling, p-values, start points):
+- Wyrd FAQ (detailed technical-ish descriptions, channels, sampling, p-values, start points, and link to colour/channel PDF):
   - https://gowyrd.org/faq/
+- Wyrd Light Data and Colours PDF (official colour/channel mapping):
+  - Local copy: `Wyrd-Light-Data-and-Colours.pdf`
+  - Original source: linked from https://gowyrd.org/faq/
 - Wyrd Light product page (modes, speed settings, baseline wandering description, activation video link):
   - https://gowyrd.org/wyrd-light/
 - "How does it work?" (conceptual framing, live vs stored RNG distinction, MPI/NT-axiom narrative):
@@ -25,6 +30,10 @@ Goal: enable future implementations to emulate the _behavior_ and _visual gramma
   - https://gowyrd.org/wyrdoscope-device/
 - Wyrd Software Suite page (analysis software capabilities + patents mentioned):
   - https://gowyrd.org/wyrdoscope-software-suite/
+- Wyrd Light User Guide PDF (boot, stages, modes, app speed/level settings):
+  - https://gowyrd.org/wp-content/uploads/2024/12/Wyrd-Light-User-Guide-V1.pdf
+- Wyrd Software User Manual 2.0.3 PDF (offline analysis interval, dynamic vs standard outputs, channel descriptions):
+  - https://gowyrd.org/wyrd-light-software-users-manual-2
 - TrueRNGpro manufacturer page (hardware RNG features + throughput):
   - https://ubld.it/products/truerngpro
 
@@ -117,11 +126,24 @@ Goal: enable future implementations to emulate the _behavior_ and _visual gramma
   - Source: "How do the Wyrd technologies interface with the Wyrd App?"
   - https://gowyrd.org/faq/
 
-- User-facing "modes" and response speed:
+- User-facing "modes," response speed, and levels:
   - "Adjustable mode – Wow (for showing off) or Mellow (for meetings and retreats)"
   - "Adjust your Light's response speed: 5 different settings"
-  - Source: Wyrd Light page.
+  - The User Guide says response speed ranges from once per second to once every 5 seconds.
+  - The User Guide lists Levels: Beginner, Intermediate, Advanced. Beginner is the default and makes higher stages easiest to trigger.
+  - Sources: Wyrd Light page and Wyrd Light User Guide.
   - https://gowyrd.org/wyrd-light/
+  - https://gowyrd.org/wp-content/uploads/2024/12/Wyrd-Light-User-Guide-V1.pdf
+
+- Stages / visual escalation:
+  - The User Guide describes three stages: Stage 1 = colours fluctuate/increase in brightness; Stage 2 = white light/whitening increases; Stage 3 = rainbow effect / full spectrum.
+  - In Mellow mode: Stage 1 colours brighten; Stage 2 colours move toward white; Stage 3 unlocks a rainbow effect.
+  - In Wow mode: Stage 1 colours brighten; Stage 2 increases swirling of the strongest colour; Stage 3 unlocks a white strobe effect with an epilepsy warning.
+  - Source: Wyrd Light User Guide.
+
+- Boot behavior:
+  - The User Guide says the physical Light takes about one minute to boot, then shows a 5-second rainbow effect, then begins processing data.
+  - For WyrdWeb, we interpret the long boot as hardware startup, not as an important analytical behavior to emulate.
 
 - Battery life: 3 hours rechargeable, or mains powered.
   - Source: https://gowyrd.org/wyrd-light/
@@ -155,31 +177,28 @@ Source: "What are channels?"
 
 - https://gowyrd.org/faq/
 
-### Channel Count Discrepancy
+### Public Channel Breakdown (Confirmed / Partially Confirmed)
 
-- **App pipeline**: Wyrd indicates **7 channels** are used, with one being Pearson (described as "Channel 5").
-  - Source: "There are currently 7 channels used..."
-  - https://gowyrd.org/faq/
+The new Wyrd Light Data and Colours PDF plus the Wyrd Software User Manual clarify the public channel model substantially.
 
-- **Software Suite**: The patented software mentions **6 channels** in automated anomaly analysis.
-  - Source: "Fully automated patented anomaly analysis of 2 REG streams including starting points on 6 channels..."
-  - https://gowyrd.org/wyrdoscope-software-suite/
+Official Wyrd Software / Light channel names currently visible in public material:
 
-We do not know the exact definition of all channels from public material. The 4 basic patterns described may be computed in multiple variants to yield 6-7 total channels.
+1. **Channel 1** — absolute z-score of vertical deviation; captures both Channel 2a and Channel 2 at once. The Wyrd Light colour PDF says this is **not used in the Light** because it is redundant.
+2. **Channel 2a** — the **parallel / correlated** pattern, where both streams show statistical significance in the same direction.
+3. **Channel 2** — the **antiparallel / anti-correlated** pattern, where the two streams mirror each other on opposite sides of the statistical parabola.
+4. **Channel 3min** — the **stick together** effect, where neither stream is significant alone, but following the same data path creates significance. The software manual describes it as minimum mean distance / decreased variance.
+5. **Channel 3max** — maximum mean distance between Alice and Bob over the longer term; related to Channel 2 and used for amber in the Light.
+6. **Channel 4** — mean absolute z-score / absolute height of both streams; a longer-term/average version of Channel 1 and used for red in the Light.
+7. **Channel 5** — Pearson correlation of the random numbers; different from the random-walk channels.
 
-### Possible Channel Breakdown (Inferred)
+This resolves much of the earlier "6 vs 7 channels" ambiguity: some public wording counts six automated analysis channels, while app/light material refers to seven channel values if Channel 2a and/or other variants are counted separately.
 
-Based on the 4 basic patterns and the 6-7 channel count, a plausible breakdown:
+Sources:
 
-1. **Correlated High** - Both streams biased toward 1s simultaneously
-2. **Correlated Low** - Both streams biased toward 0s simultaneously
-3. **Anti-correlated A>B** - Stream A biased high, stream B biased low
-4. **Anti-correlated B>A** - Stream B biased high, stream A biased low
-5. **Stick Together** - Bit-by-bit agreement exceeds chance
-6. **Pearson Positive** - Positive correlation coefficient
-7. **Pearson Negative** - Negative correlation coefficient (or combined with #6)
-
-Alternatively, channels 1-4 might collapse into 2 channels (correlated vs anti-correlated magnitude), with additional channels for different time scales or detection methods.
+- Local `Wyrd-Light-Data-and-Colours.pdf`
+- Wyrd Software User Manual 2.0.3
+- https://gowyrd.org/faq/
+- https://gowyrd.org/wyrdoscope-software-suite/
 
 ## Significance, p-values, and "Starting Points" (Confirmed)
 
@@ -254,10 +273,11 @@ For the four basic channel types, the likely implementations are:
 - **Anti-correlated signal**: When `z_A * z_B < 0` (deviating in opposite directions), strength = `|z_A * z_B|` or `min(|z_A|, |z_B|)`
 
 #### 3. "Stick Together" Pattern
-- Create agreement sequence: `agree(i) = 1 if A_i == B_i, else 0`
-- Under null hypothesis, P(agree) = 0.5
-- Compute z-score of agreement count: `z_agree = (agree_count - n/2) / sqrt(n/4)`
-- High z_agree indicates unusual agreement
+- Early inference: create agreement sequence `agree(i) = 1 if A_i == B_i`, then test excess bit-by-bit agreement.
+- Newer public material suggests the official Light's Channel 3min is closer to a **random-walk closeness / minimum-distance** detector:
+  - The colour PDF says neither stream would be statistically significant on its own, but following the same data path creates significance.
+  - The software manual describes Channel 3min as the probability of the minimum mean distance of Alice and Bob from the starting point, and statistically as a decrease of variance.
+- Practical guidance: keep bitwise agreement as a possible supplemental/debug statistic, but a Wyrd-aligned implementation should prioritize random-walk distance/closeness for "stick together."
 
 #### 4. Pearson Correlation
 - Treat bit sequences as ±1 values
@@ -294,6 +314,23 @@ The software suite supports:
 - Ability to reverse random data before calculation
 
 Source: https://gowyrd.org/wyrdoscope-software-suite/
+
+### Standard vs dynamic analysis outputs (Confirmed)
+
+The Wyrd Software User Manual 2.0.3 describes two result-file flavors:
+
+- **Standard output**: calculated with some noise reduction, favors longer-term correlations, may miss short peaks, useful as a cleaner overview.
+- **Dynamic output**: full processing without noise reduction, catches shorter peaks, noisier and more volatile, assigns start points more directly.
+
+It also includes a **Use Live Settling Value** setting for Wyrd Light and Wyrdoscope-Live data. With this enabled, processing raw Alice/Bob files should produce the same dynamic output values as the live Light / Wyrdoscope-Live.
+
+Implementation decision for WyrdWeb:
+
+- Do **not** expose Standard/Dynamic as a main UI control yet.
+- Let `Mellow` behave calmer/stabler and `Wow` behave more dynamic/dramatic internally.
+- Keep the possibility of an advanced/debug “analysis feel” control for future technical users.
+
+Source: Wyrd Software User Manual 2.0.3
 
 ## Raw Data Format (Confirmed)
 
@@ -341,20 +378,26 @@ Source: https://gowyrd.org/how-does-it-work/
 
 These items are not stated as implementation, but they are strongly implied by Wyrd's descriptions.
 
-### Sampling cadence
+### Sampling cadence and response speed
 
-- The App pipeline suggests 1Hz updates: "Each second the values are calculated… and the p-values are sent to the App."
+- The App pipeline suggests 1Hz live values: "Each second the values are calculated… and the p-values are sent to the App."
 - The Wyrd Light's 200-bit sampling implies a natural unit of analysis.
+- The Wyrd Light User Guide says the app response speed setting ranges from once per second to once every 5 seconds.
+- The Wyrd Software User Manual says offline analysis default interval is 60 seconds, with 3 seconds minimum and 6 seconds recommended for shorter sessions. This is likely an offline-analysis resolution setting, not necessarily the live Light cadence.
 
-Inference:
+Implementation guidance:
 
-- Expect a loop like:
-  - every second: select 200-bit segments from each stream, compute channel p-values, update state
-  - between seconds: smooth output for display (light intensity should not strobe)
+- Keep cadence and visual style conceptually separate:
+  - **Cadence / response speed** = how often new signal values are computed/applied (1s..5s in the official Light).
+  - **Style / mode** = how Mellow/Wow renders those values.
+- WyrdWeb currently keeps the public UI simple and does not expose response speed. Future versions may add it.
+- Between signal updates, smooth output for display and avoid dangerous strobe behavior.
 
 Source basis:
 
 - https://gowyrd.org/faq/
+- Wyrd Light User Guide PDF
+- Wyrd Software User Manual 2.0.3
 
 ### Why segmentation matters
 
@@ -458,35 +501,59 @@ Confirmed:
 - "The colours are playfully assigned to different kinds of data structure (they don't carry specific meanings)".
 - "The colours reflect different structures manifesting in the random data, in real time."
 - They suspect "data structures reflect different qualities in the consciousness field" but don't yet know what those qualities are.
+- The Wyrd Light Data and Colours PDF now gives an official public mapping between Light colours and data channels.
+
+Official Wyrd Light colour mapping:
+
+| Colour | Channel(s) | Meaning / pattern |
+| --- | --- | --- |
+| **Red** | `max(Channel 2a, Channel 4)` | Parallel/correlated and longer-term absolute-height structures |
+| **Amber** | `max(Channel 2, Channel 3max)` | Antiparallel/diverging and longer-term maximum-distance structures |
+| **Blue** | `Channel 3min` | Stick-together / random-walk closeness |
+| **Green** | `Channel 5` | Pearson correlation |
+| **N/A** | `Channel 1` | Redundant in the Light; not used |
 
 Sources:
 
+- Local `Wyrd-Light-Data-and-Colours.pdf`
 - https://gowyrd.org/faq/
 - https://gowyrd.org/wyrd-light/
 
-Inference:
+Implementation guidance:
 
-- A dominant-channel selection (winner-take-most) is likely, but with hysteresis/dwell to avoid rapid switching.
-- Wyrd explicitly talks about "stays stable in one colour for a long period" as a meaningful observation cue, implying the UI intentionally allows long dwell.
+- Use Wyrd's colour grammar for user-facing visuals: red / amber / blue / green.
+- Keep directional details (both high vs both low, A-high/B-low vs B-high/A-low, Pearson +/-) as debug/internal information for now.
+- A dominant-channel selection (winner-take-most) is still likely useful, but with hysteresis/dwell to avoid rapid switching.
+- Baseline should remain dim and slowly wander through softened colours rather than imply a specific channel.
 
 Source basis:
 
 - https://gowyrd.org/wyrd-light/
 
-### Pattern / dynamics
+### Pattern / dynamics / stages
 
-Observed (from their product description, and typical lamp behavior):
+Confirmed / observed:
 
 - "builds towards increasing brightness" is an explicit user instruction, suggesting episodes rather than instantaneous flashes.
+- The Wyrd Light User Guide describes three visual stages:
+  - Stage 1: colours increase/fluctuate in brightness.
+  - Stage 2: colours move toward white light.
+  - Stage 3: rainbow/full spectrum in Mellow; white strobe in Wow with seizure warning.
 
-Source:
+Sources:
 
 - https://gowyrd.org/wyrd-light/
+- Wyrd Light User Guide PDF
 
-Inference:
+Implementation guidance:
 
 - The visual should be driven by a _slow envelope_ (integrator) rather than raw per-second values.
-- Different channels probably modulate motion/texture in addition to hue (e.g., Pearson as swirling / ring-like dynamics), consistent with their note that Pearson behaves differently.
+- WyrdWeb should avoid dangerous strobe behavior. Use the existing anomaly animation (white core / expanding white ring) as the safe Stage 3 substitute.
+- Suggested WyrdWeb stage mapping:
+  - Stage 1: selected official channel colour brightens.
+  - Stage 2: channel colour whitens/blooms.
+  - Stage 3: expanding white anomaly ring / safe pulse, optionally with subtle rainbow shimmer.
+- Different channels may later modulate motion/texture, but for now keep user-facing visuals simple and place directional details in debug.
 
 ## Multiple Wyrd Lights Behavior (Confirmed)
 
@@ -528,15 +595,17 @@ The Wyrd Light page links to an activation video:
 
 - https://gowyrd.org/wp-content/uploads/2024/12/Light_Activation_V3_Vertical.mp4
 
-Observed (high-confidence but still "observed"):
+Observed / documented:
 
 - There is a deliberate activation choreography (boot/ignite), not just immediate random wandering.
-- The device appears to avoid strobing and uses smooth ramps (suggesting heavy smoothing/integration).
-- Color changes are not rapid flicker; they tend to come in "phases".
+- The User Guide says the physical Light takes about one minute to boot, then shows a 5-second rainbow effect.
+- The User Guide documents a Wow Stage 3 white strobe effect with an epilepsy warning.
+- Product media still suggests most ordinary color changes are not rapid flicker; they tend to come in "phases".
 
 Important limitation:
 
 - We have not machine-analyzed frames or extracted exact timing curves; the observations above are qualitative.
+- WyrdWeb intentionally prioritizes safe screen-share behavior and should use pulse/bloom/ring effects rather than dangerous strobe.
 
 ### Likely reason for the mismatch in early emulations
 
@@ -571,8 +640,10 @@ Wyrd's mention of:
   - output per-channel probability-like values (p-values)
 - Output mapping:
   - brightness driven primarily by p-values (with smoothing)
-  - color driven by dominant channel (with dwell/hysteresis)
-  - channel-specific motion/texture parameters
+  - colour driven by the dominant Wyrd-aligned visual channel (red parallel, amber antiparallel, blue stick, green Pearson) with dwell/hysteresis
+  - baseline as dim, slow colour wandering
+  - high significance as staged whitening and safe pulse/ring effects
+  - channel-specific motion/texture parameters can be added later, but keep the first refactor simple
 
 Source basis:
 
@@ -581,48 +652,56 @@ Source basis:
 
 ### Channel implementation hints
 
-Based on the four confirmed patterns:
+Target Wyrd-aligned visual channels:
 
-1. **Correlated**: Compare z-scores of bit sums in A and B. When both deviate in the same direction (both high or both low), signal correlated.
-2. **Anti-correlated**: When z-scores deviate in opposite directions.
-3. **Stick together**: Count positions where A[i] == B[i] over the window. High agreement = stick.
-4. **Pearson**: Compute Pearson correlation coefficient between the two streams (treating bits as ±1 or 0/1).
+1. **Red / parallel**: combine a short-term parallel detector (Channel 2a-like) with a longer-term absolute-height detector (Channel 4-like); use the stronger value.
+2. **Amber / antiparallel**: combine a short-term antiparallel detector (Channel 2-like) with a longer-term maximum-distance detector (Channel 3max-like); use the stronger value.
+3. **Blue / stick together**: implement Channel 3min-like random-walk closeness / minimum-distance, not only raw bit-by-bit equality.
+4. **Green / Pearson**: compute Pearson correlation coefficient between the two streams (treating bits as ±1 or 0/1); keep positive/negative direction in debug for now.
 
-Inference: The algorithm likely uses cumulative sums / random walk representations to detect when these patterns begin (starting points) rather than just instantaneous values.
+Implementation notes:
 
-### "Wow" vs "Mellow" modes (inference)
+- Directional subcases are still useful internally (`both high`, `both low`, `A high/B low`, `B high/A low`, Pearson +/-), but should not create separate public colours.
+- The algorithm likely uses cumulative sums / random-walk representations to detect when these patterns begin (starting points) rather than just instantaneous values.
+- Keep bitwise agreement as an optional supplemental/debug statistic until the random-walk closeness detector is validated.
+
+### "Wow" vs "Mellow" modes
 
 Confirmed:
 
 - The product states two modes exist.
+- The User Guide says Mellow Stage 3 unlocks rainbow/full-spectrum behavior, while Wow Stage 3 unlocks a white strobe with an epilepsy warning.
 
-Inference:
+WyrdWeb implementation decision:
 
-- These likely modify:
-  - response speed / smoothing constants
-  - max brightness and/or saturation
-  - how easily the light changes colors (dominance hysteresis)
+- Keep only Mellow/Wow as the public mode control.
+- `Mellow`: calmer, more stable, background-friendly; suitable for meetings, retreats, screen sharing, and long sessions.
+- `Wow`: more dynamic, dramatic, engaging; suitable when groups actively watch and experiment.
+- Do not copy dangerous strobe. Use soft pulse/bloom/expanding ring as the high-intensity effect.
+- Let Mellow/Wow internally tune visual style and some settling/dynamic feel, but keep Standard/Dynamic as future advanced/debug terminology only.
 
 Source:
 
 - https://gowyrd.org/wyrd-light/
+- Wyrd Light User Guide PDF
 
 ### Response speed (5 settings)
 
 Confirmed:
 
 - "Adjust your Light's response speed: 5 different settings".
+- The User Guide defines these as once per second through once every 5 seconds.
 
-Inference:
+WyrdWeb implementation decision:
 
-- Likely adjusts:
-  - tick averaging interval or window size
-  - smoothing time constants
-  - segmentation memory length
+- Do not add this to the public UI yet; keep the current controls simple.
+- Document as future work.
+- If added later, treat it as cadence (how often new values are computed/applied), separate from style (Mellow/Wow rendering).
 
 Source:
 
 - https://gowyrd.org/wyrd-light/
+- Wyrd Light User Guide PDF
 
 ## Historical Context: PEAR and Predecessors
 
@@ -657,11 +736,15 @@ Sources:
 
 Unknowns we cannot fill from public sources:
 
-- Exact definition of all 6-7 channels (only 4 basic patterns described).
-- Exact segmentation algorithm for "starting points".
-- Exact mapping of channels to specific colors (they claim it's playful and not meaning-laden).
+- Exact patented formulas for each channel, especially the segmentation and start-point algorithm.
 - Exact p-value calibration (analytic vs empirical vs hybrid).
+- Exact live-settling behavior used in Wyrd Light vs offline software outputs.
 - Details of the "patented algorithm" that interweaves the two 200-bit samples.
+- Exact visual timing curves for stages, whitening, rainbow, and official strobe.
+
+No longer unknown:
+
+- Public Wyrd Light colour/channel mapping is now documented in `Wyrd-Light-Data-and-Colours.pdf`.
 
 ## Appendix: Hardware and Software Specifications
 
@@ -696,7 +779,9 @@ Source: https://gowyrd.org/wyrdoscope-device/
 
 - Fully automated patented anomaly analysis on 6 channels
 - Selectable time intervals (max 24h per run)
-- Output in CSV result matrix
+- Output/result matrix support; v1 used CSV, while v2 defaults to JSON and also supports CBOR, with CSV still supported
+- Standard output and dynamic output result files
+- Live Settling Value option for matching Wyrd Light / Wyrdoscope-Live behavior
 - Graphical UI for plotting and zooming
 - Export of zoomed selections
 - Re-calculation with smaller averaging intervals
@@ -705,7 +790,10 @@ Source: https://gowyrd.org/wyrdoscope-device/
 - Plot export (PNG, SVG)
 - Audio event playback synchronized with data
 
-Source: https://gowyrd.org/wyrdoscope-software-suite/
+Sources:
+
+- https://gowyrd.org/wyrdoscope-software-suite/
+- Wyrd Software User Manual 2.0.3
 
 ### Patent References
 

@@ -14,34 +14,35 @@ Try it here: https://wyrdweb.adam.nz/
 
 The Wyrd Web app takes two streams of random numbers (zeros and ones) and monitors them for trends that deviate from expected randomness (eg. they start matching each other). It can be displayed on a large TV or screen shared on a video conference, providing groups with an easy and fun way to experiment with collective intention and receive immediate, visual feedback on their efforts.
 
-Non-random, statistical patterns are represented as a moving, shimmering orb of light. The suggestion from the Wyrdo's is that different patterns represent different group experiences. We don't yet know how to map or generate them. In theory, groups should be able to learn how to deliberately make the orb change color and rotation.
+Non-random, statistical patterns are represented as a moving, shimmering orb of light. Wyrd now publicly documents that its lamp colours are associated with data structures, not universal meanings. The fun research question is what kinds of individual or group experiences seem to invite those different structures.
 
-Orb Colors:
+Target Orb Colors (Wyrd-aligned):
 
-- ⚫️ Baseline: no pattern is strong enough to dominate 
-- 🔵 Correlated: both streams drift the same way - more 1s (↑) or more 0s (↓)
-- 🟡🔴 Diverging: streams drift in opposite directions - A high/B low (←) or B high/A low (→)
-- 🟢 Agreement: bit-by-bit matches are higher than expected by chance
-- 🟣 Pearson: correlation becomes the dominant pattern (a "pearly" look)
+- ⚫️ Baseline: no pattern is strong enough to dominate; should remain dim and slowly wander through colour
+- 🔴 Parallel / correlated: the two streams drift in the same direction
+- 🟠 Antiparallel / diverging: the two streams drift in opposite directions
+- 🔵 Stick together: the two streams follow unusually similar paths
+- 🟢 Pearson: Pearson correlation becomes the dominant pattern
 
-Brightness tracks overall statistical significance. When it crosses a threshold, you'll see an expanding white ring pulse.
+Brightness tracks overall statistical significance. When it crosses a threshold, you'll see an expanding white ring pulse. We use this as a safer, screen-share-friendly interpretation of the Wyrd Light's highest-intensity stage rather than copying the official Wow-mode white strobe effect.
 
-The Pearson swirl is separate from the dominant color: when correlation is strong enough, the orb develops a rotating swirl. It spins clockwise for positive correlation (+) and counterclockwise for negative (-).  This can happen alongside any other pattern.
+There are two main settings you can use to adjust the visual experience:
 
-There are two settings you can use to adjust the visual experience:
+- **Mode (wow / mellow)** affects how dynamic the visualisation is. Mellow is intended for longer, background use. Wow is intended for groups actively watching and experimenting.
+- **Sensitivity (conservative / moderate / engaging)** affects how statistically significant an event must be. These labels map roughly to Wyrd's Advanced / Intermediate / Beginner levels, but use friendlier names.
 
-- **Mode (wow / mellow)** affects how dynamic the visualisation is. Mellow might be suitable longer, background uses. Wow might be suitable if you are actively watching and experimenting.
-- **Sensitivity (conservative / moderate / engaging)** affects how statistically significant an event must be. In *conservative* mode an event will occur approximately every ten minutes, in *moderate* every three minutes, and in *engaging* every minute.
+Future versions may add Wyrd's separate **response speed** setting (1-5 seconds). For now, the public controls stay intentionally simple.
 
-Your mission, should you choose to accept it, is to figure out how to control the patterns. 🤯 🦄 🤣
+Your mission, should you choose to accept it, is to explore what conditions seem to invite different patterns. 🤯 🦄 🤣
 
 As always, feedback is welcome. 💬
 
 # Caveats
 
-- This is my first vibe coded app. I used Claude/ChatGPT to attempt to reverse engineer what the Wryd Light does from the limited information on their website (see [WYRDLIGHT.md](WYRDLIGHT.md)).
+- This is my first vibe coded app. I used Claude/ChatGPT to attempt to reverse engineer what the Wyrd Light does from the limited information on their website (see [WYRDLIGHT.md](WYRDLIGHT.md)).
 - The math involved is beyond my expertise, so I can't validate the AI implementation.
-- Currently, the web app uses `crypto.getRandomValues()` to generate the streams of random numbers; this is not a quantum source.
+- Currently, the web app uses `crypto.getRandomValues()` to generate the streams of random numbers; this is not a quantum source and does not reproduce Wyrd's stored, previously unobserved quantum random data model.
+- The current implementation is in transition: the documentation now tracks the newer public Wyrd colour/channel mapping, while the code may still contain older experimental channel names until the next refactor.
 - I'm still experimenting with visualisation and UI. Once that seems to be working well, I'll look at wiring up a quantum source.
 
 # Background
