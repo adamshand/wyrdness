@@ -10,7 +10,14 @@ Primary goals:
 
 ## Where The Implementation Lives
 
+- `php/app/public/page.js` + `php/app/public/index.php` + `php/app/public/page.css`
+  - current buildless PHP/Kawhi port that is being actively tuned
+  - signal engine (200-bit samples per tick)
+  - Wyrd-aligned visual channels and calibrated walk-distance Channel 3min/3max approximations
+  - renderer (canvas orb), HUD, hotkeys, debug panel
+
 - `src/routes/+page.svelte`
+  - original SvelteKit implementation/reference
   - signal engine (200-bit samples per tick)
   - starting-point (segmentation) search over recent ticks
   - channel detection + dominance selection
@@ -189,6 +196,17 @@ Hotkeys:
 - `S` cycle sensitivity (Conservative/Moderate/Engaging)
 - `D` toggle demo mode
 - `Escape` close modals / stop demo
+
+Agent/debug mode:
+
+- Open the PHP port with `?agent=1` to enable an agent-readable debug stream.
+- Example: `https://wyrdness.sites.haume.nz/?agent=1`
+- This automatically opens the debug panel, adds a compact on-page stream, logs `WYRD_AGENT {...}` JSON snapshots once per second, and exposes:
+  - `window.__wyrdAgent.snapshot()` — current structured state
+  - `window.__wyrdAgent.history()` — recent snapshots
+  - `window.__wyrdAgent.text()` — compact text stream
+  - `window.__wyrdAgent.clear()` — clear recorded snapshots
+- Use this instead of screenshots when tuning channel thresholds, dominance, significance, or visual stages.
 
 ## Demo Mode
 

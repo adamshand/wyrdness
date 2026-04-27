@@ -12,6 +12,8 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
+		"calibrate:walk": "node tools/calibrate-walk-detectors.js",
+		"validate:null": "node tools/validate-signal-null.js",
 		"deployprod": "caprover deploy -h https://captain.ruru.haume.nz -a wyrdweb -b main -p $( awk -F= '/^CAPROVER_PASS=/ {print $2}' ~/.env )"
 	},
 	"devDependencies": {

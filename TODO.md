@@ -20,6 +20,8 @@ Based on the documentation, here are reasonable next steps to better reproduce t
 
 ## Todo
 
+4. Consider adding Wyrd's response speed setting 1-5 to change how quickly the interface changes.
+
 5. QRNG Integration (Lower Priority, but planned)
 AGENTS.md already outlines the architecture:
 - Backend endpoint to fetch from qrandom.io

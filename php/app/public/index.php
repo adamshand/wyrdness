@@ -33,18 +33,18 @@ ob_start();
         <div class="dev-row"><span class="k">corr low</span><span class="v" data-dev="rawCorrelatedLow">0.0%</span></div>
         <div class="dev-row"><span class="k">anti A/B</span><span class="v" data-dev="rawAntiAb">0.0%</span></div>
         <div class="dev-row"><span class="k">anti B/A</span><span class="v" data-dev="rawAntiBa">0.0%</span></div>
-        <div class="dev-row"><span class="k">walk close raw</span><span class="v" data-dev="rawStick">0.0%</span></div>
-        <div class="dev-row"><span class="k">walk apart raw</span><span class="v" data-dev="rawWalkSeparate">0.0%</span></div>
+        <div class="dev-row"><span class="k">3min close</span><span class="v" data-dev="rawStick">0.0%</span></div>
+        <div class="dev-row"><span class="k">3max apart</span><span class="v" data-dev="rawWalkSeparate">0.0%</span></div>
         <div class="dev-row"><span class="k">pearson raw</span><span class="v" data-dev="rawPearson">0.0%</span></div>
 
         <div class="dev-section-title">Stats</div>
         <div class="dev-row"><span class="k">zA / zB</span><span class="v" data-dev="zAB">0.00 / 0.00</span></div>
         <div class="dev-row"><span class="k">Pearson r</span><span class="v" data-dev="pearsonR">0.000</span></div>
         <div class="dev-row"><span class="k">Pearson dir</span><span class="v" data-dev="pearsonDir">+</span></div>
-        <div class="dev-row"><span class="k">Agree z</span><span class="v" data-dev="zAgree">0.00</span></div>
-        <div class="dev-row"><span class="k">Walk close z</span><span class="v" data-dev="walkCloseZ">0.00</span></div>
-        <div class="dev-row"><span class="k">Walk apart z</span><span class="v" data-dev="walkSeparateZ">0.00</span></div>
-        <div class="dev-row"><span class="k">Walk distance</span><span class="v" data-dev="walkDistance">0.0 / 0.0</span></div>
+        <div class="dev-row"><span class="k">Agree z legacy</span><span class="v" data-dev="zAgree">0.00</span></div>
+        <div class="dev-row"><span class="k">3min z equiv</span><span class="v" data-dev="walkCloseZ">0.00</span></div>
+        <div class="dev-row"><span class="k">3max z equiv</span><span class="v" data-dev="walkSeparateZ">0.00</span></div>
+        <div class="dev-row"><span class="k">Walk ratio / p</span><span class="v" data-dev="walkDistance">0.0 / 0.0</span></div>
         <div class="dev-row"><span class="k">p raw / p adj</span><span class="v" data-dev="pValues">1.00 / 1.00</span></div>
         <div class="dev-row"><span class="k">Surprisal</span><span class="v" data-dev="surprisal">0.00</span></div>
         <div class="dev-row"><span class="k">Anomaly</span><span class="v" data-dev="anomalyState">idle</span></div>
@@ -63,10 +63,10 @@ ob_start();
 
     <aside id="wyrd-legend-panel" class="legend-panel" aria-label="Color legend" hidden>
         <h3>Color Legend</h3>
-        <div class="legend-row"><span class="swatch" style="--h:356"></span><span><strong>Red / Parallel</strong> — the streams drift in the same direction.</span></div>
-        <div class="legend-row"><span class="swatch" style="--h:36"></span><span><strong>Amber / Antiparallel</strong> — the streams drift in opposite directions.</span></div>
-        <div class="legend-row"><span class="swatch" style="--h:212"></span><span><strong>Blue / Stick together</strong> — the streams follow unusually similar paths.</span></div>
-        <div class="legend-row"><span class="swatch" style="--h:135"></span><span><strong>Green / Pearson</strong> — Pearson correlation is dominant.</span></div>
+        <div class="legend-row"><span class="swatch" style="--h:356"></span><span><strong>Parallel</strong> — the streams drift in the same direction.</span></div>
+        <div class="legend-row"><span class="swatch" style="--h:36"></span><span><strong>Antiparallel</strong> — the streams drift in opposite directions.</span></div>
+        <div class="legend-row"><span class="swatch" style="--h:212"></span><span><strong>Stick together</strong> — the streams follow unusually similar paths.</span></div>
+        <div class="legend-row"><span class="swatch" style="--h:135"></span><span><strong>Pearson</strong> — Pearson correlation is dominant.</span></div>
         <div class="legend-row"><span class="indicator">+ −</span><span>Swirl direction: clockwise / counter-clockwise Pearson sign.</span></div>
     </aside>
 
@@ -135,7 +135,7 @@ ob_start();
 
     <div id="wyrd-demo-overlay" class="demo-overlay" hidden>
         <div class="demo-label-main" data-demo="main">Parallel</div>
-        <div class="demo-label-pearson" data-demo="pearson">Pearson+ (clockwise)</div>
+        <div class="demo-label-pearson" data-demo="pearson" hidden></div>
         <div class="demo-progress" data-demo="progress">1 / 5</div>
     </div>
 

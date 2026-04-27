@@ -371,33 +371,78 @@ body.wyrd-app-page .site-footer {
     display: none !important;
 }
 
-@media (max-width: 800px) {
-    .bar-left {
-        display: none;
+@media (max-width: 1100px) {
+    .bottom-bar {
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 6px 16px;
+        padding: 8px 14px 9px;
     }
 
-    .bottom-bar {
+    .bar-left {
+        order: 1;
+        width: 100%;
         justify-content: center;
-        gap: 20px;
-        padding-inline: 14px;
+        flex-wrap: wrap;
+        gap: 6px 14px;
+        font-size: 11px;
     }
 
     .bar-center {
         position: static;
+        order: 2;
+        flex: 1 1 0;
+        text-align: left;
         transform: none;
     }
 
     .bar-right {
+        order: 2;
+        flex: 1 1 0;
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        gap: 12px;
         margin-left: 0;
-        gap: 10px;
     }
 
     .mode-info {
-        display: none;
+        justify-self: center;
+    }
+}
+
+@media (max-width: 800px) {
+    .bottom-bar {
+        gap: 5px 12px;
+    }
+
+    .mode-info {
+        font-size: 12px;
     }
 }
 
 @media (max-width: 520px) {
+    .bottom-bar {
+        padding-inline: 10px;
+    }
+
+    .bar-left {
+        gap: 5px 9px;
+        font-size: 10px;
+    }
+
+    .bar-right {
+        gap: 9px;
+    }
+
+    .mode-info {
+        font-size: 11px;
+    }
+
+    .state-name {
+        font-size: 15px;
+    }
+
     .legend-panel,
     .dev-panel {
         top: 10px;

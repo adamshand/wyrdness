@@ -4,6 +4,8 @@
     const CHANNELS = ['correlated_high', 'correlated_low', 'anti_ab', 'anti_ba', 'stick', 'walk_separate', 'pearson'];
     const VISUAL_CHANNELS = ['parallel', 'antiparallel', 'stick_together', 'pearson'];
     const DEMO_CHANNELS = [...VISUAL_CHANNELS];
+    const AGENT_MODE = new URLSearchParams(window.location.search).get('agent') !== null && new URLSearchParams(window.location.search).get('agent') !== '0';
+    const AGENT_LOG_LIMIT = 300;
     const DEMO_LABELS = {
         parallel: 'Parallel',
         antiparallel: 'Antiparallel',
@@ -55,7 +57,9 @@
             stickZFull: 4.5,
             pearsonRStart: 0.25,
             pearsonRFull: 0.5,
-            dominanceThreshold: 0.12
+            dominanceThreshold: 0.12,
+            walkPStart: 0.005,
+            walkPFull: 0.0001
         },
         moderate: {
             strengthZStart: 2.0,
@@ -64,7 +68,9 @@
             stickZFull: 4.0,
             pearsonRStart: 0.2,
             pearsonRFull: 0.45,
-            dominanceThreshold: 0.12
+            dominanceThreshold: 0.12,
+            walkPStart: 0.02,
+            walkPFull: 0.0003
         },
         engaging: {
             strengthZStart: 1.7,
@@ -73,7 +79,9 @@
             stickZFull: 3.8,
             pearsonRStart: 0.16,
             pearsonRFull: 0.4,
-            dominanceThreshold: 0.1
+            dominanceThreshold: 0.1,
+            walkPStart: 0.05,
+            walkPFull: 0.001
         }
     };
     const SENSITIVITY_LABELS = {
@@ -81,6 +89,42 @@
         moderate: 'Moderate',
         engaging: 'Engaging'
     };
+
+    // Empirical null calibration from tools/calibration/walk-distance-200bit-lookback120-1m.json.
+    // Tables map best-over-window walk-distance ratios to tail p-values after the
+    // same 200-bit, 120-tick starting-point search used at runtime.
+    const WALK_CLOSE_LOWER_TAIL = [
+        [0.00001, 0],
+        [0.00005, 0],
+        [0.0001, 0.030227550042426273],
+        [0.0002, 0.030227550042426273],
+        [0.0005, 0.04078295569076971],
+        [0.001, 0.060455100084852546],
+        [0.002, 0.08156591138153942],
+        [0.005, 0.10195738922692427],
+        [0.01, 0.12234886707230912],
+        [0.02, 0.15113775021213138],
+        [0.05, 0.19465693868532874],
+        [0.1, 0.22427781768245045],
+        [0.25, 0.2720479503818365],
+        [0.5, 0.3313490088683782]
+    ];
+    const WALK_SEPARATE_UPPER_TAIL = [
+        [0.5, 2.2838455186831035],
+        [0.25, 2.6998243364868393],
+        [0.1, 3.1306829544349917],
+        [0.05, 3.4046117169390664],
+        [0.02, 3.731640445705428],
+        [0.01, 3.9575163979061716],
+        [0.005, 4.176029573250684],
+        [0.002, 4.410507583798626],
+        [0.001, 4.546334763593183],
+        [0.0005, 4.704348730479528],
+        [0.0002, 4.84810975624406],
+        [0.0001, 4.96184223514363],
+        [0.00005, 5.067480546384635],
+        [0.00001, 5.394070523518128]
+    ];
 
     const COHERENCE_FLOOR = 0.35;
     const MAX_LOOKBACK = 120;
@@ -115,6 +159,10 @@
         zAgree: 0,
         walkCloseZ: 0,
         walkSeparateZ: 0,
+        walkCloseRatio: 1,
+        walkSeparateRatio: 1,
+        walkCloseP: 1,
+        walkSeparateP: 1,
         walkCloseDistance: 0,
         walkSeparateDistance: 0,
         pMinRaw: 1,
@@ -156,6 +204,8 @@
         visualRender: zeroVisual(),
         sigEnergyRender: 0,
         renderScale: 0.75,
+        agentLog: [],
+        agentLastLogMs: 0,
         raf: 0
     };
 
@@ -233,6 +283,52 @@
 
     function strengthFromZ(z, zStart, zFull) {
         return clamp01((Math.abs(z) - zStart) / (zFull - zStart));
+    }
+
+    function strengthFromP(p, pStart, pFull) {
+        const safeP = Math.max(1e-12, Math.min(1, p));
+        const value = -Math.log10(safeP);
+        const start = -Math.log10(pStart);
+        const full = -Math.log10(pFull);
+        return clamp01((value - start) / (full - start));
+    }
+
+    function interpolateLogP(p1, x1, p2, x2, x) {
+        if (x1 === x2) return Math.min(p1, p2);
+        const t = clamp01((x - x1) / (x2 - x1));
+        return Math.exp(Math.log(p1) + (Math.log(p2) - Math.log(p1)) * t);
+    }
+
+    function empiricalTailP(value, table, mode) {
+        if (!Number.isFinite(value) || table.length === 0) return 1;
+
+        if (mode === 'lower') {
+            if (value <= table[0][1]) return table[0][0];
+            if (value >= table[table.length - 1][1]) return 1;
+        } else {
+            if (value <= table[0][1]) return 1;
+            if (value >= table[table.length - 1][1]) return table[table.length - 1][0];
+        }
+
+        for (let i = 0; i < table.length - 1; i++) {
+            const [p1, x1] = table[i];
+            const [p2, x2] = table[i + 1];
+            if (value >= x1 && value <= x2) return interpolateLogP(p1, x1, p2, x2, value);
+        }
+
+        return 1;
+    }
+
+    function zEquivalentFromOneSidedP(p) {
+        const target = 1 - Math.max(1e-12, Math.min(1, p));
+        let lo = 0;
+        let hi = 8;
+        for (let i = 0; i < 36; i++) {
+            const mid = (lo + hi) / 2;
+            if (normalCdf(mid) < target) lo = mid;
+            else hi = mid;
+        }
+        return (lo + hi) / 2;
     }
 
     function zeroRaw() {
@@ -437,17 +533,22 @@
     }
 
     function walkDistanceScores(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-        let bestCloseZ = 0;
+        let bestCloseRatio = Number.POSITIVE_INFINITY;
         let bestCloseStart = currentIdx;
         let bestCloseDistance = 0;
-        let bestSeparateZ = 0;
+        let bestCloseLegacyZ = 0;
+        let bestSeparateRatio = Number.NEGATIVE_INFINITY;
         let bestSeparateStart = currentIdx;
         let bestSeparateDistance = 0;
+        let bestSeparateLegacyZ = 0;
         const searchStart = Math.max(0, currentIdx - lookback);
+
+        let foundCandidate = false;
 
         for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
             const tickSpan = currentIdx - s;
             if (tickSpan < minLen) continue;
+            foundCandidate = true;
 
             let sumDistance = 0;
             let expectedSumDistance = 0;
@@ -467,30 +568,61 @@
             }
 
             const meanDistance = sumDistance / tickSpan;
-            const expectedMean = Math.max(1, expectedSumDistance / tickSpan);
+            const expectedMean = Math.max(1e-12, expectedSumDistance / tickSpan);
             const ratio = meanDistance / expectedMean;
-            const ratioSigma = Math.max(0.09, 0.34 / Math.pow(tickSpan, 0.25));
-            const closeZ = (1 - ratio) / ratioSigma;
-            const separateZ = (ratio - 1) / ratioSigma;
 
-            if (closeZ > bestCloseZ) {
-                bestCloseZ = closeZ;
+            // Keep the old guessed z transform only as a diagnostic. Active channel
+            // strength/significance now comes from empirical null calibration tables.
+            const ratioSigma = Math.max(0.09, 0.34 / Math.pow(tickSpan, 0.25));
+            const closeLegacyZ = (1 - ratio) / ratioSigma;
+            const separateLegacyZ = (ratio - 1) / ratioSigma;
+
+            if (ratio < bestCloseRatio) {
+                bestCloseRatio = ratio;
                 bestCloseStart = s;
                 bestCloseDistance = meanDistance;
+                bestCloseLegacyZ = closeLegacyZ;
             }
 
-            if (separateZ > bestSeparateZ) {
-                bestSeparateZ = separateZ;
+            if (ratio > bestSeparateRatio) {
+                bestSeparateRatio = ratio;
                 bestSeparateStart = s;
                 bestSeparateDistance = meanDistance;
+                bestSeparateLegacyZ = separateLegacyZ;
             }
         }
 
+        if (!foundCandidate) {
+            return {
+                closeRatio: 1,
+                closeP: 1,
+                closeZ: 0,
+                closeLegacyZ: 0,
+                closeStart: currentIdx,
+                closeDistance: 0,
+                separateRatio: 1,
+                separateP: 1,
+                separateZ: 0,
+                separateLegacyZ: 0,
+                separateStart: currentIdx,
+                separateDistance: 0
+            };
+        }
+
+        const closeP = empiricalTailP(bestCloseRatio, WALK_CLOSE_LOWER_TAIL, 'lower');
+        const separateP = empiricalTailP(bestSeparateRatio, WALK_SEPARATE_UPPER_TAIL, 'upper');
+
         return {
-            closeZ: bestCloseZ,
+            closeRatio: bestCloseRatio,
+            closeP,
+            closeZ: zEquivalentFromOneSidedP(closeP),
+            closeLegacyZ: bestCloseLegacyZ,
             closeStart: bestCloseStart,
             closeDistance: bestCloseDistance,
-            separateZ: bestSeparateZ,
+            separateRatio: bestSeparateRatio,
+            separateP,
+            separateZ: zEquivalentFromOneSidedP(separateP),
+            separateLegacyZ: bestSeparateLegacyZ,
             separateStart: bestSeparateStart,
             separateDistance: bestSeparateDistance
         };
@@ -538,6 +670,10 @@
         state.episodes = makeEpisodes();
         state.walkCloseZ = 0;
         state.walkSeparateZ = 0;
+        state.walkCloseRatio = 1;
+        state.walkSeparateRatio = 1;
+        state.walkCloseP = 1;
+        state.walkSeparateP = 1;
         state.walkCloseDistance = 0;
         state.walkSeparateDistance = 0;
         state.pMinRaw = 1;
@@ -609,7 +745,7 @@
         const k = 1 - Math.exp(-dtMs / tau);
         state.dominance = state.dominance + (target - state.dominance) * k;
         if (shouldSwitch) state.dominant = next;
-        if (state.dominant === 'baseline' && state.dominance < 0.05) state.dominant = 'baseline';
+        if (next === 'baseline' && state.dominance < 0.05) state.dominant = 'baseline';
     }
 
     function signalTick() {
@@ -656,14 +792,16 @@
         const spWalk = walkDistanceScores(state.cumSumA, state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
         const walkCloseZ = spWalk.closeZ;
         const walkSeparateZ = spWalk.separateZ;
+        const walkCloseP = spWalk.closeP;
+        const walkSeparateP = spWalk.separateP;
         const sens = sensitivityPreset();
 
         const corrHighRaw = strengthFromZLocal(corrHighZ);
         const corrLowRaw = strengthFromZLocal(corrLowZ);
         const antiAbRaw = strengthFromZLocal(antiAbZ);
         const antiBaRaw = strengthFromZLocal(antiBaZ);
-        const stickRaw = strengthFromZLocal(walkCloseZ, sens.stickZStart, sens.stickZFull);
-        const walkSeparateRaw = strengthFromZLocal(walkSeparateZ, sens.stickZStart, sens.stickZFull);
+        const stickRaw = strengthFromP(walkCloseP, sens.walkPStart, sens.walkPFull);
+        const walkSeparateRaw = strengthFromP(walkSeparateP, sens.walkPStart, sens.walkPFull);
 
         const updateEpisode = (channel, currentZ, segmentStart) => {
             const ep = state.episodes[channel];
@@ -701,6 +839,10 @@
         state.zAgree = state.zAgree + (stickZ - state.zAgree) * statK;
         state.walkCloseZ = state.walkCloseZ + (walkCloseZ - state.walkCloseZ) * statK;
         state.walkSeparateZ = state.walkSeparateZ + (walkSeparateZ - state.walkSeparateZ) * statK;
+        state.walkCloseRatio = state.walkCloseRatio + (spWalk.closeRatio - state.walkCloseRatio) * statK;
+        state.walkSeparateRatio = state.walkSeparateRatio + (spWalk.separateRatio - state.walkSeparateRatio) * statK;
+        state.walkCloseP = state.walkCloseP + (walkCloseP - state.walkCloseP) * statK;
+        state.walkSeparateP = state.walkSeparateP + (walkSeparateP - state.walkSeparateP) * statK;
         if (spWalk.closeStart < currentIdx) state.walkCloseDistance = state.walkCloseDistance + (spWalk.closeDistance - state.walkCloseDistance) * statK;
         if (spWalk.separateStart < currentIdx) state.walkSeparateDistance = state.walkSeparateDistance + (spWalk.separateDistance - state.walkSeparateDistance) * statK;
         state.pearsonR = state.pearsonR + (pearsonRSeg - state.pearsonR) * statK;
@@ -731,8 +873,8 @@
         const pCorrLow = corrLowZ !== 0 ? twoSidedPFromZ(corrLowZ) : 1;
         const pAntiAb = antiAbZ !== 0 ? twoSidedPFromZ(antiAbZ) : 1;
         const pAntiBa = antiBaZ !== 0 ? twoSidedPFromZ(antiBaZ) : 1;
-        const pStick = Math.min(1, (walkCloseZ > 0 ? oneSidedPFromZ(walkCloseZ) : 1) / 0.05);
-        const pWalkSeparate = Math.min(1, (walkSeparateZ > 0 ? oneSidedPFromZ(walkSeparateZ) : 1) / 0.05);
+        const pStick = walkCloseP;
+        const pWalkSeparate = walkSeparateP;
         const pPearson = Math.min(1, (pearsonZSeg !== 0 ? twoSidedPFromZ(pearsonZSeg) : 1) / 0.016);
         const pMinRaw = Math.min(pCorrHigh, pCorrLow, pAntiAb, pAntiBa, pStick, pWalkSeparate, pPearson);
         const pOverallCalibrated = Math.min(1, pMinRaw / 0.11);
@@ -878,6 +1020,7 @@
 
         renderOrb();
         syncUi();
+        recordAgentSnapshot();
     }
 
     function resize() {
@@ -913,7 +1056,7 @@
         const bootLock = bootT < 1;
         const sig = state.sigEnergyRender;
         const cx = w * 0.5;
-        const cy = h * 0.54;
+        const cy = h * 0.5;
         const rFull = Math.min(w, h) * 0.42;
         const rBoot = rFull * (0.06 + 0.94 * smoothstep(0, 1, bootT));
         const r = bootLock ? rBoot : rFull;
@@ -1121,6 +1264,122 @@
         }
     }
 
+    function agentSnapshot() {
+        return {
+            t: Date.now(),
+            tick: state.tickCount,
+            fps: Number(state.fps.toFixed(1)),
+            mode: state.lightMode,
+            sensitivity: state.sensitivity,
+            dominant: state.dominant,
+            dominance: Number(state.dominance.toFixed(4)),
+            stage: currentStage(),
+            coherence: Number(state.coherence.toFixed(4)),
+            sigEnergy: Number(state.sigEnergy.toFixed(4)),
+            sigEnergyRender: Number(state.sigEnergyRender.toFixed(4)),
+            visual: {
+                parallel: Number(state.visualRender.parallel.toFixed(4)),
+                antiparallel: Number(state.visualRender.antiparallel.toFixed(4)),
+                stick: Number(state.visualRender.stick_together.toFixed(4)),
+                pearson: Number(state.visualRender.pearson.toFixed(4))
+            },
+            raw: {
+                correlatedHigh: Number(state.rawRender.correlated_high.toFixed(4)),
+                correlatedLow: Number(state.rawRender.correlated_low.toFixed(4)),
+                antiAb: Number(state.rawRender.anti_ab.toFixed(4)),
+                antiBa: Number(state.rawRender.anti_ba.toFixed(4)),
+                channel3min: Number(state.rawRender.stick.toFixed(4)),
+                channel3max: Number(state.rawRender.walk_separate.toFixed(4)),
+                pearson: Number(state.rawRender.pearson.toFixed(4))
+            },
+            stats: {
+                zA: Number(state.zA.toFixed(3)),
+                zB: Number(state.zB.toFixed(3)),
+                agreeZLegacy: Number(state.zAgree.toFixed(3)),
+                pearsonR: Number(state.pearsonR.toFixed(4)),
+                pearsonDir: state.pearsonDir,
+                walkCloseZ: Number(state.walkCloseZ.toFixed(3)),
+                walkSeparateZ: Number(state.walkSeparateZ.toFixed(3)),
+                walkCloseRatio: Number(state.walkCloseRatio.toFixed(4)),
+                walkSeparateRatio: Number(state.walkSeparateRatio.toFixed(4)),
+                walkCloseP: Number(state.walkCloseP.toPrecision(4)),
+                walkSeparateP: Number(state.walkSeparateP.toPrecision(4))
+            },
+            p: {
+                minRaw: Number(state.pMinRaw.toPrecision(4)),
+                overallCalibrated: Number(state.pOverallCalibrated.toPrecision(4)),
+                overall: Number(state.pOverall.toPrecision(4)),
+                surprisal: Number(state.surprisal.toFixed(3))
+            }
+        };
+    }
+
+    function agentLine(snapshot) {
+        const time = new Date(snapshot.t).toLocaleTimeString();
+        const v = snapshot.visual;
+        const s = snapshot.stats;
+        return `${time} t${snapshot.tick} ${snapshot.dominant.padEnd(14)} st${snapshot.stage} sig=${snapshot.sigEnergyRender.toFixed(3)} coh=${snapshot.coherence.toFixed(3)} vis=${v.parallel.toFixed(2)}/${v.antiparallel.toFixed(2)}/${v.stick.toFixed(2)}/${v.pearson.toFixed(2)} walk=${s.walkCloseRatio.toFixed(3)}:${s.walkCloseP.toExponential(1)} ${s.walkSeparateRatio.toFixed(3)}:${s.walkSeparateP.toExponential(1)} p=${snapshot.p.overallCalibrated.toExponential(1)}`;
+    }
+
+    function ensureAgentPanel() {
+        if (!AGENT_MODE || el.agentPanel) return;
+        const panel = document.createElement('pre');
+        panel.id = 'wyrd-agent-panel';
+        panel.setAttribute('aria-label', 'Agent debug stream');
+        panel.style.cssText = [
+            'position:fixed',
+            'top:18px',
+            'right:18px',
+            'width:min(620px,calc(100vw - 396px))',
+            'max-height:52vh',
+            'overflow:hidden',
+            'margin:0',
+            'padding:12px 14px',
+            'border-radius:14px',
+            'background:rgba(4,5,10,0.72)',
+            'border:1px solid rgba(255,255,255,0.10)',
+            'box-shadow:0 18px 50px rgba(0,0,0,0.45)',
+            'color:rgba(220,235,255,0.92)',
+            'font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
+            'white-space:pre-wrap',
+            'pointer-events:none',
+            'z-index:70'
+        ].join(';');
+        document.body.appendChild(panel);
+        el.agentPanel = panel;
+    }
+
+    function updateAgentPanel() {
+        if (!AGENT_MODE || !el.agentPanel) return;
+        const recent = state.agentLog.slice(-22);
+        el.agentPanel.textContent = ['WyrdWeb agent stream (?agent=1)', 'time tick dominant       stage sig/coh visual(par/anti/stick/pearson) walk(close:p apart:p) pAdj', ...recent.map(agentLine)].join('\n');
+    }
+
+    function recordAgentSnapshot(force = false) {
+        if (!AGENT_MODE) return;
+        const now = performance.now();
+        if (!force && now - state.agentLastLogMs < 1000) return;
+        state.agentLastLogMs = now;
+        const snapshot = agentSnapshot();
+        state.agentLog.push(snapshot);
+        if (state.agentLog.length > AGENT_LOG_LIMIT) state.agentLog.splice(0, state.agentLog.length - AGENT_LOG_LIMIT);
+        updateAgentPanel();
+        console.info(`WYRD_AGENT ${JSON.stringify(snapshot)}`);
+    }
+
+    function exposeAgentApi() {
+        if (!AGENT_MODE) return;
+        window.__wyrdAgent = {
+            snapshot: agentSnapshot,
+            history: () => state.agentLog.slice(),
+            text: () => state.agentLog.map(agentLine).join('\n'),
+            clear: () => {
+                state.agentLog = [];
+                updateAgentPanel();
+            }
+        };
+    }
+
     function syncUi() {
         el.stateName.textContent = `${DISPLAY_NAMES[state.dominant]}${getPearsonIndicator(state.pearsonSpin)}`;
         el.modeInfo.textContent = `${state.lightMode === 'wow' ? 'Wow' : 'Mellow'} / ${SENSITIVITY_LABELS[state.sensitivity]}`;
@@ -1131,8 +1390,7 @@
         if (state.demoMode) {
             const isAnomaly = state.demoIndex === DEMO_CHANNELS.length;
             el.demoMain.textContent = isAnomaly ? 'Anomaly' : DEMO_LABELS[state.demoChannel];
-            el.demoPearson.hidden = isAnomaly;
-            el.demoPearson.textContent = state.demoPearsonDir === 1 ? 'Pearson+  (clockwise)' : 'Pearson−  (counter-clockwise)';
+            el.demoPearson.hidden = true;
             el.demoProgress.textContent = `${state.demoIndex + 1} / ${DEMO_CHANNELS.length + 1}`;
         }
 
@@ -1159,7 +1417,7 @@
             el.dev.zAgree.textContent = state.zAgree.toFixed(2);
             el.dev.walkCloseZ.textContent = state.walkCloseZ.toFixed(2);
             el.dev.walkSeparateZ.textContent = state.walkSeparateZ.toFixed(2);
-            el.dev.walkDistance.textContent = `${state.walkCloseDistance.toFixed(1)} / ${state.walkSeparateDistance.toFixed(1)}`;
+            el.dev.walkDistance.textContent = `${state.walkCloseRatio.toFixed(3)} / ${state.walkSeparateRatio.toFixed(3)} | p ${state.walkCloseP.toExponential(1)} / ${state.walkSeparateP.toExponential(1)}`;
             el.dev.pValues.textContent = `${state.pMinRaw.toExponential(1)} / ${state.pOverallCalibrated.toExponential(1)}`;
             el.dev.surprisal.textContent = state.surprisal.toFixed(2);
             const anomalyActive = state.sigPulseStart > 0;
@@ -1294,6 +1552,11 @@
     function init() {
         cacheElements();
         if (!canvasEl) return;
+        if (AGENT_MODE) {
+            state.showDev = true;
+            ensureAgentPanel();
+            exposeAgentApi();
+        }
         bufCanvas = document.createElement('canvas');
         const ctx = bufCanvas.getContext('2d');
         if (!ctx) {
@@ -1311,6 +1574,7 @@
         reseed();
         resize();
         syncUi();
+        recordAgentSnapshot(true);
         window.addEventListener('resize', resize, { passive: true });
         window.addEventListener('keydown', handleKeydown);
 
