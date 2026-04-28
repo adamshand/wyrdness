@@ -204,6 +204,12 @@
         visualRender: zeroVisual(),
         sigEnergyRender: 0,
         renderScale: 0.75,
+        sessionStartWallMs: Date.now(),
+        sessionStartPerfMs: performance.now(),
+        sessionLog: [],
+        sessionLastSampleMs: 0,
+        sessionLastDominant: 'baseline',
+        sessionLastStage: 0,
         agentLog: [],
         agentLastLogMs: 0,
         raf: 0
@@ -1020,6 +1026,7 @@
 
         renderOrb();
         syncUi();
+        recordSessionSample();
         recordAgentSnapshot();
     }
 
@@ -1380,6 +1387,115 @@
         };
     }
 
+    function sessionElapsedMs() {
+        return Math.max(0, performance.now() - state.sessionStartPerfMs);
+    }
+
+    function formatTimecode(elapsedMs) {
+        const totalMs = Math.max(0, Math.round(elapsedMs));
+        const ms = totalMs % 1000;
+        const totalSeconds = Math.floor(totalMs / 1000);
+        const seconds = totalSeconds % 60;
+        const totalMinutes = Math.floor(totalSeconds / 60);
+        const minutes = totalMinutes % 60;
+        const hours = Math.floor(totalMinutes / 60);
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+    }
+
+    function sessionRow(type = 'sample', extra = {}) {
+        const elapsedMs = sessionElapsedMs();
+        return {
+            utc: new Date(state.sessionStartWallMs + elapsedMs).toISOString(),
+            elapsed_ms: Math.round(elapsedMs),
+            timecode: formatTimecode(elapsedMs),
+            type,
+            tick: state.tickCount,
+            mode: state.lightMode,
+            sensitivity: state.sensitivity,
+            dominant: state.dominant,
+            stage: currentStage(),
+            coherence: Number(state.coherence.toFixed(5)),
+            sig_energy: Number(state.sigEnergy.toFixed(5)),
+            sig_render: Number(state.sigEnergyRender.toFixed(5)),
+            parallel: Number(state.visualRender.parallel.toFixed(5)),
+            antiparallel: Number(state.visualRender.antiparallel.toFixed(5)),
+            stick_together: Number(state.visualRender.stick_together.toFixed(5)),
+            pearson: Number(state.visualRender.pearson.toFixed(5)),
+            raw_corr_high: Number(state.rawRender.correlated_high.toFixed(5)),
+            raw_corr_low: Number(state.rawRender.correlated_low.toFixed(5)),
+            raw_anti_ab: Number(state.rawRender.anti_ab.toFixed(5)),
+            raw_anti_ba: Number(state.rawRender.anti_ba.toFixed(5)),
+            raw_3min_close: Number(state.rawRender.stick.toFixed(5)),
+            raw_3max_apart: Number(state.rawRender.walk_separate.toFixed(5)),
+            raw_pearson: Number(state.rawRender.pearson.toFixed(5)),
+            p_min_raw: Number(state.pMinRaw.toPrecision(5)),
+            p_overall_calibrated: Number(state.pOverallCalibrated.toPrecision(5)),
+            p_overall: Number(state.pOverall.toPrecision(5)),
+            surprisal: Number(state.surprisal.toFixed(5)),
+            z_a: Number(state.zA.toFixed(5)),
+            z_b: Number(state.zB.toFixed(5)),
+            agree_z_legacy: Number(state.zAgree.toFixed(5)),
+            pearson_r: Number(state.pearsonR.toFixed(6)),
+            walk_close_ratio: Number(state.walkCloseRatio.toFixed(6)),
+            walk_close_p: Number(state.walkCloseP.toPrecision(5)),
+            walk_separate_ratio: Number(state.walkSeparateRatio.toFixed(6)),
+            walk_separate_p: Number(state.walkSeparateP.toPrecision(5)),
+            ...extra
+        };
+    }
+
+    function recordSessionRow(type = 'sample', extra = {}) {
+        state.sessionLog.push(sessionRow(type, extra));
+    }
+
+    function recordSessionSample(force = false) {
+        const now = performance.now();
+        const stage = currentStage();
+
+        if (state.dominant !== state.sessionLastDominant) {
+            recordSessionRow('dominant_change', { from: state.sessionLastDominant, to: state.dominant });
+            state.sessionLastDominant = state.dominant;
+        }
+
+        if (stage !== state.sessionLastStage) {
+            recordSessionRow('stage_change', { from: state.sessionLastStage, to: stage });
+            state.sessionLastStage = stage;
+        }
+
+        if (force || now - state.sessionLastSampleMs >= 1000) {
+            state.sessionLastSampleMs = now;
+            recordSessionRow('sample');
+        }
+    }
+
+    function csvEscape(value) {
+        if (value == null) return '';
+        const text = String(value);
+        return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+    }
+
+    function sessionLogCsv() {
+        const rows = state.sessionLog.length ? state.sessionLog : [sessionRow('sample')];
+        const columns = Array.from(rows.reduce((set, row) => {
+            Object.keys(row).forEach((key) => set.add(key));
+            return set;
+        }, new Set()));
+        return [columns.join(','), ...rows.map((row) => columns.map((column) => csvEscape(row[column])).join(','))].join('\n') + '\n';
+    }
+
+    function openSessionLog() {
+        recordSessionSample(true);
+        const csv = sessionLogCsv();
+        const blob = new Blob([csv], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const win = window.open(url, '_blank');
+        if (win) {
+            win.opener = null;
+        } else {
+            console.info('WyrdWeb session log CSV:\n' + csv);
+        }
+    }
+
     function syncUi() {
         el.stateName.textContent = `${DISPLAY_NAMES[state.dominant]}${getPearsonIndicator(state.pearsonSpin)}`;
         el.modeInfo.textContent = `${state.lightMode === 'wow' ? 'Wow' : 'Mellow'} / ${SENSITIVITY_LABELS[state.sensitivity]}`;
@@ -1474,12 +1590,14 @@
         state.demoBoost = 0;
         state.demoPearsonBoost = 0;
         state.demoStartTime = performance.now();
+        recordSessionRow('demo_start');
     }
 
     function stopDemo() {
         state.demoMode = false;
         state.demoBoost = 0;
         state.demoPearsonBoost = 0;
+        recordSessionRow('demo_stop');
     }
 
     function handleKeydown(e) {
@@ -1490,7 +1608,11 @@
             toggleHelp();
             return;
         }
-        if (e.key === 'l' || e.key === 'L') {
+        if (e.key === 'L' && e.shiftKey) {
+            openSessionLog();
+            return;
+        }
+        if ((e.key === 'l' || e.key === 'L') && !e.shiftKey) {
             state.showLegend = !state.showLegend;
             syncUi();
             return;
@@ -1501,18 +1623,22 @@
             return;
         }
         if (e.key === 'm' || e.key === 'M') {
+            const from = state.lightMode;
             state.lightMode = state.lightMode === 'wow' ? 'mellow' : 'wow';
+            recordSessionRow('mode_change', { from, to: state.lightMode });
             syncUi();
             return;
         }
         if (e.key === 's' || e.key === 'S') {
+            const from = state.sensitivity;
             const order = ['conservative', 'moderate', 'engaging'];
             const idx = order.indexOf(state.sensitivity);
             state.sensitivity = order[(idx + 1) % order.length];
+            recordSessionRow('sensitivity_change', { from, to: state.sensitivity });
             syncUi();
             return;
         }
-        if (e.key === 'd' || e.key === 'D') {
+        if ((e.key === 'd' || e.key === 'D') && !e.shiftKey) {
             if (state.demoMode) stopDemo();
             else startDemo();
             syncUi();
@@ -1572,8 +1698,16 @@
         });
 
         reseed();
+        state.sessionStartWallMs = Date.now();
+        state.sessionStartPerfMs = performance.now();
+        state.sessionLog = [];
+        state.sessionLastSampleMs = 0;
+        state.sessionLastDominant = state.dominant;
+        state.sessionLastStage = currentStage();
         resize();
         syncUi();
+        recordSessionRow('session_start');
+        recordSessionSample(true);
         recordAgentSnapshot(true);
         window.addEventListener('resize', resize, { passive: true });
         window.addEventListener('keydown', handleKeydown);

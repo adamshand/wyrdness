@@ -195,6 +195,7 @@ Hotkeys:
 - `M` toggle mode (Wow/Mellow)
 - `S` cycle sensitivity (Conservative/Moderate/Engaging)
 - `D` toggle demo mode
+- `Shift+L` open a timestamped CSV session log in a new tab
 - `Escape` close modals / stop demo
 
 Agent/debug mode:

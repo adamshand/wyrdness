@@ -110,6 +110,7 @@ ob_start();
             <li><strong>S</strong> Sensitivity — Conservative / Moderate / Engaging</li>
             <li><strong>D</strong> Demo — start or stop demo mode</li>
             <li><strong>L</strong> Legend — toggle color legend</li>
+            <li><strong>Shift+L</strong> Session log — open a timestamped CSV log in a new tab</li>
             <li><strong>`</strong> Debug — show additional signal data</li>
             <li><strong>Esc</strong> Close panels or stop demo</li>
         </ul>
@@ -146,6 +147,7 @@ ob_start();
             <span class="shortcut"><b>S</b> sensitivity</span>
             <span class="shortcut"><b>D</b> demo</span>
             <span class="shortcut"><b>L</b> legend</span>
+            <span class="shortcut"><b>⇧L</b> log</span>
             <span class="shortcut"><b>`</b> debug</span>
         </div>
         <div class="bar-center">
