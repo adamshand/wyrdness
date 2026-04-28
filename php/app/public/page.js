@@ -4,7 +4,8 @@
     const CHANNELS = ['correlated_high', 'correlated_low', 'anti_ab', 'anti_ba', 'stick', 'walk_separate', 'pearson'];
     const VISUAL_CHANNELS = ['parallel', 'antiparallel', 'stick_together', 'pearson'];
     const DEMO_CHANNELS = [...VISUAL_CHANNELS];
-    const AGENT_MODE = new URLSearchParams(window.location.search).get('agent') !== null && new URLSearchParams(window.location.search).get('agent') !== '0';
+    const QUERY = new URLSearchParams(window.location.search);
+    const AGENT_MODE = QUERY.get('agent') !== null && QUERY.get('agent') !== '0';
     const AGENT_LOG_LIMIT = 300;
     const DEMO_LABELS = {
         parallel: 'Parallel',
@@ -127,6 +128,9 @@
     ];
 
     const COHERENCE_FLOOR = 0.35;
+    const P_NULL_PEARSON = 0.016;
+    const P_NULL_MIN_CHANNELS = 0.11;
+    const DEMO_ANOMALY_P_SCALE = 0.001;
     const MAX_LOOKBACK = 120;
     const MIN_SEGMENT_LEN = 3;
     const EPISODE_Z_THRESHOLD = 1.6;
@@ -282,11 +286,6 @@
         return Math.max(1e-18, Math.min(1, 2 * tail));
     }
 
-    function oneSidedPFromZ(z) {
-        const tail = 1 - normalCdf(z);
-        return Math.max(1e-18, Math.min(1, tail));
-    }
-
     function strengthFromZ(z, zStart, zFull) {
         return clamp01((Math.abs(z) - zStart) / (zFull - zStart));
     }
@@ -369,6 +368,68 @@
 
     function percent(v) {
         return `${(v * 100).toFixed(1)}%`;
+    }
+
+    function tickIntervalMs() {
+        return 1000 / Math.max(0.25, state.updatesPerSec);
+    }
+
+    function smoothValue(current, target, k) {
+        return current + (target - current) * k;
+    }
+
+    function boostedDemoValue(channel, value) {
+        if (state.demoChannel !== channel) return value;
+        return Math.min(1, value + state.demoBoost);
+    }
+
+    function pFromSegmentZ(z) {
+        if (z === 0) return 1;
+        return twoSidedPFromZ(z);
+    }
+
+    function hueTauForDominant() {
+        if (state.demoMode) return 400;
+        if (state.dominant === 'baseline') return 14000;
+        return preset().hueTauMs;
+    }
+
+    function baseSaturationForDominant() {
+        if (state.dominant === 'baseline') return 10;
+        if (state.dominant === 'pearson') return 40;
+        return 80;
+    }
+
+    function anomalyStateLabel(anomalyActive, cooldownLeft) {
+        if (anomalyActive) return 'ring';
+        if (state.sigEnergyRender >= SIG_PULSE_THRESHOLD) return 'above threshold';
+        if (cooldownLeft > 0) return `cooldown ${(cooldownLeft / 1000).toFixed(1)}s`;
+        return 'armed';
+    }
+
+    function strongestAntiparallelEpisodeKey() {
+        const antiAb = state.rawRender.anti_ab;
+        const antiBa = state.rawRender.anti_ba;
+        const walkSeparate = state.rawRender.walk_separate;
+
+        if (walkSeparate >= Math.max(antiAb, antiBa)) return 'walk_separate';
+        if (antiAb >= antiBa) return 'anti_ab';
+        return 'anti_ba';
+    }
+
+    function episodeKeyForDominant(dominant) {
+        if (!dominant) return null;
+
+        switch (dominant) {
+            case 'parallel':
+                return state.rawRender.correlated_high >= state.rawRender.correlated_low ? 'correlated_high' : 'correlated_low';
+            case 'antiparallel':
+                return strongestAntiparallelEpisodeKey();
+            case 'stick_together':
+                return 'stick';
+            default:
+                return dominant;
+        }
     }
 
     function defaultEpisode() {
@@ -838,35 +899,35 @@
         updateEpisode('pearson', pearsonZSeg, spPearson.startIdx);
 
         const statsTau = 2800;
-        const statsDtMs = 1000 / Math.max(0.25, state.updatesPerSec);
+        const statsDtMs = tickIntervalMs();
         const statK = 1 - Math.exp(-statsDtMs / statsTau);
-        state.zA = state.zA + (spA.z - state.zA) * statK;
-        state.zB = state.zB + (spB.z - state.zB) * statK;
-        state.zAgree = state.zAgree + (stickZ - state.zAgree) * statK;
-        state.walkCloseZ = state.walkCloseZ + (walkCloseZ - state.walkCloseZ) * statK;
-        state.walkSeparateZ = state.walkSeparateZ + (walkSeparateZ - state.walkSeparateZ) * statK;
-        state.walkCloseRatio = state.walkCloseRatio + (spWalk.closeRatio - state.walkCloseRatio) * statK;
-        state.walkSeparateRatio = state.walkSeparateRatio + (spWalk.separateRatio - state.walkSeparateRatio) * statK;
-        state.walkCloseP = state.walkCloseP + (walkCloseP - state.walkCloseP) * statK;
-        state.walkSeparateP = state.walkSeparateP + (walkSeparateP - state.walkSeparateP) * statK;
-        if (spWalk.closeStart < currentIdx) state.walkCloseDistance = state.walkCloseDistance + (spWalk.closeDistance - state.walkCloseDistance) * statK;
-        if (spWalk.separateStart < currentIdx) state.walkSeparateDistance = state.walkSeparateDistance + (spWalk.separateDistance - state.walkSeparateDistance) * statK;
-        state.pearsonR = state.pearsonR + (pearsonRSeg - state.pearsonR) * statK;
+        state.zA = smoothValue(state.zA, spA.z, statK);
+        state.zB = smoothValue(state.zB, spB.z, statK);
+        state.zAgree = smoothValue(state.zAgree, stickZ, statK);
+        state.walkCloseZ = smoothValue(state.walkCloseZ, walkCloseZ, statK);
+        state.walkSeparateZ = smoothValue(state.walkSeparateZ, walkSeparateZ, statK);
+        state.walkCloseRatio = smoothValue(state.walkCloseRatio, spWalk.closeRatio, statK);
+        state.walkSeparateRatio = smoothValue(state.walkSeparateRatio, spWalk.separateRatio, statK);
+        state.walkCloseP = smoothValue(state.walkCloseP, walkCloseP, statK);
+        state.walkSeparateP = smoothValue(state.walkSeparateP, walkSeparateP, statK);
+        if (spWalk.closeStart < currentIdx) state.walkCloseDistance = smoothValue(state.walkCloseDistance, spWalk.closeDistance, statK);
+        if (spWalk.separateStart < currentIdx) state.walkSeparateDistance = smoothValue(state.walkSeparateDistance, spWalk.separateDistance, statK);
+        state.pearsonR = smoothValue(state.pearsonR, pearsonRSeg, statK);
 
         const pearsonRaw = clamp01((Math.abs(pearsonRSeg) - sens.pearsonRStart) / (sens.pearsonRFull - sens.pearsonRStart));
         const raw = {
-            correlated_high: state.demoChannel === 'parallel' ? Math.min(1, corrHighRaw + state.demoBoost) : corrHighRaw,
+            correlated_high: boostedDemoValue('parallel', corrHighRaw),
             correlated_low: corrLowRaw,
-            anti_ab: state.demoChannel === 'antiparallel' ? Math.min(1, antiAbRaw + state.demoBoost) : antiAbRaw,
+            anti_ab: boostedDemoValue('antiparallel', antiAbRaw),
             anti_ba: antiBaRaw,
-            stick: state.demoChannel === 'stick_together' ? Math.min(1, stickRaw + state.demoBoost) : stickRaw,
+            stick: boostedDemoValue('stick_together', stickRaw),
             walk_separate: walkSeparateRaw,
-            pearson: state.demoChannel === 'pearson' ? Math.min(1, pearsonRaw + state.demoBoost) : pearsonRaw
+            pearson: boostedDemoValue('pearson', pearsonRaw)
         };
         const visual = visualFromRaw(raw);
         state.rawLast = raw;
         state.visualLast = visual;
-        updateDominant(visual, 1000 / Math.max(0.25, state.updatesPerSec));
+        updateDominant(visual, tickIntervalMs());
         state.coherence = Math.max(...VISUAL_CHANNELS.map((channel) => visual[channel]));
 
         if (!state.demoMode) {
@@ -874,18 +935,18 @@
             if (state.demoBoost < 0.01) state.demoBoost = 0;
         }
 
-        const dtMs = 1000 / Math.max(0.25, state.updatesPerSec);
-        const pCorrHigh = corrHighZ !== 0 ? twoSidedPFromZ(corrHighZ) : 1;
-        const pCorrLow = corrLowZ !== 0 ? twoSidedPFromZ(corrLowZ) : 1;
-        const pAntiAb = antiAbZ !== 0 ? twoSidedPFromZ(antiAbZ) : 1;
-        const pAntiBa = antiBaZ !== 0 ? twoSidedPFromZ(antiBaZ) : 1;
+        const dtMs = tickIntervalMs();
+        const pCorrHigh = pFromSegmentZ(corrHighZ);
+        const pCorrLow = pFromSegmentZ(corrLowZ);
+        const pAntiAb = pFromSegmentZ(antiAbZ);
+        const pAntiBa = pFromSegmentZ(antiBaZ);
         const pStick = walkCloseP;
         const pWalkSeparate = walkSeparateP;
-        const pPearson = Math.min(1, (pearsonZSeg !== 0 ? twoSidedPFromZ(pearsonZSeg) : 1) / 0.016);
+        const pPearson = Math.min(1, pFromSegmentZ(pearsonZSeg) / P_NULL_PEARSON);
         const pMinRaw = Math.min(pCorrHigh, pCorrLow, pAntiAb, pAntiBa, pStick, pWalkSeparate, pPearson);
-        const pOverallCalibrated = Math.min(1, pMinRaw / 0.11);
+        const pOverallCalibrated = Math.min(1, pMinRaw / P_NULL_MIN_CHANNELS);
         const pOverallReal = Math.min(COHERENCE_FLOOR, pOverallCalibrated);
-        const pOverall = state.demoBoost > 0.05 ? Math.min(pOverallReal, 0.001 * (1 - state.demoBoost)) : pOverallReal;
+        const pOverall = state.demoBoost > 0.05 ? Math.min(pOverallReal, DEMO_ANOMALY_P_SCALE * (1 - state.demoBoost)) : pOverallReal;
         const surprisal = Math.min(6, -Math.log10(pOverall));
         state.pMinRaw = pMinRaw;
         state.pOverallCalibrated = pOverallCalibrated;
@@ -895,7 +956,7 @@
         const mode = preset();
         const sigTau = targetSig > state.sigEnergy ? mode.sigEnergyRiseMs : mode.sigEnergyFallMs;
         const sigK = 1 - Math.exp(-dtMs / sigTau);
-        state.sigEnergy = state.sigEnergy + (targetSig - state.sigEnergy) * sigK;
+        state.sigEnergy = smoothValue(state.sigEnergy, targetSig, sigK);
     }
 
     function step(dtMs) {
@@ -969,7 +1030,7 @@
         const dt = dtMs / 1000;
         const pearsonK = 1 - Math.exp(-dtMs / 900);
         const effectivePearson = state.demoMode ? state.demoPearsonBoost : state.pearsonR;
-        state.pearsonSpin = state.pearsonSpin + (effectivePearson - state.pearsonSpin) * pearsonK;
+        state.pearsonSpin = smoothValue(state.pearsonSpin, effectivePearson, pearsonK);
         if (!bootLock) {
             if (Math.abs(state.pearsonSpin) > 0.05) state.pearsonDir = state.pearsonSpin > 0 ? 1 : -1;
         } else {
@@ -984,7 +1045,7 @@
             const current = state.rawRender[ch];
             const tau = target > current ? 1800 : 4000;
             const k = 1 - Math.exp(-dtMs / tau);
-            state.rawRender[ch] = current + (target - current) * k;
+            state.rawRender[ch] = smoothValue(current, target, k);
         }
 
         for (const ch of VISUAL_CHANNELS) {
@@ -992,12 +1053,12 @@
             const current = state.visualRender[ch];
             const tau = target > current ? 1800 : 4000;
             const k = 1 - Math.exp(-dtMs / tau);
-            state.visualRender[ch] = current + (target - current) * k;
+            state.visualRender[ch] = smoothValue(current, target, k);
         }
 
         if (!state.demoMode) {
             const k = 1 - Math.exp(-dtMs / 600);
-            state.sigEnergyRender = state.sigEnergyRender + (state.sigEnergy - state.sigEnergyRender) * k;
+            state.sigEnergyRender = smoothValue(state.sigEnergyRender, state.sigEnergy, k);
         }
 
         const now = performance.now();
@@ -1016,13 +1077,11 @@
         }
 
         const baseHue = state.dominant === 'baseline' ? baselineHue(performance.now()) : PALETTE[state.dominant].hue;
-        const hueTau = state.demoMode ? 400 : state.dominant === 'baseline' ? 14000 : preset().hueTauMs;
-        const hueK = 1 - Math.exp(-dtMs / hueTau);
+        const hueK = 1 - Math.exp(-dtMs / hueTauForDominant());
         state.hueSmooth = hueApproach(state.hueSmooth, baseHue, hueK);
-        const baseSat = state.dominant === 'baseline' ? 10 : state.dominant === 'pearson' ? 40 : 80;
-        const satTarget = baseSat + preset().saturationBoost;
+        const satTarget = baseSaturationForDominant() + preset().saturationBoost;
         const satK = 1 - Math.exp(-dtMs / preset().satTauMs);
-        state.satSmooth = state.satSmooth + (satTarget - state.satSmooth) * satK;
+        state.satSmooth = smoothValue(state.satSmooth, satTarget, satK);
 
         renderOrb();
         syncUi();
@@ -1538,7 +1597,7 @@
             el.dev.surprisal.textContent = state.surprisal.toFixed(2);
             const anomalyActive = state.sigPulseStart > 0;
             const cooldownLeft = Math.max(0, SIG_PULSE_COOLDOWN - (performance.now() - state.sigPulseLastTime));
-            el.dev.anomalyState.textContent = anomalyActive ? 'ring' : state.sigEnergyRender >= SIG_PULSE_THRESHOLD ? 'above threshold' : cooldownLeft > 0 ? `cooldown ${(cooldownLeft / 1000).toFixed(1)}s` : 'armed';
+            el.dev.anomalyState.textContent = anomalyStateLabel(anomalyActive, cooldownLeft);
             el.dev.tickCount.textContent = String(state.tickCount);
             el.dev.fps.textContent = state.fps.toFixed(0);
 
@@ -1556,13 +1615,7 @@
             el.dev.epWalkSeparate.textContent = episodeText('walk_separate');
             el.dev.epPearson.textContent = episodeText('pearson');
 
-            const episodeKey = domNonBaseline === 'parallel'
-                ? (state.rawRender.correlated_high >= state.rawRender.correlated_low ? 'correlated_high' : 'correlated_low')
-                : domNonBaseline === 'antiparallel'
-                    ? (state.rawRender.walk_separate >= Math.max(state.rawRender.anti_ab, state.rawRender.anti_ba) ? 'walk_separate' : state.rawRender.anti_ab >= state.rawRender.anti_ba ? 'anti_ab' : 'anti_ba')
-                    : domNonBaseline === 'stick_together'
-                        ? 'stick'
-                        : domNonBaseline;
+            const episodeKey = episodeKeyForDominant(domNonBaseline);
 
             if (episodeKey && state.episodes[episodeKey]) {
                 const ep = state.episodes[episodeKey];
