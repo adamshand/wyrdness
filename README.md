@@ -2,9 +2,9 @@
 
 # What Is This?
 
-The Wyrd Web is a reverse engineered, hybrid implementation of the [Wyrd Light](https://gowyrd.org/wyrd-light/) and [Wyrdoscope](https://gowyrd.org/wyrdoscope-device/).
+The Wyrdness is a reverse engineered, hybrid implementation of the [Wyrd Light](https://gowyrd.org/wyrd-light/) and [Wyrdoscope](https://gowyrd.org/wyrdoscope-device/).
 
-Try it here: https://wyrdweb.adam.nz/
+Try it here: https://wyrdness.adam.nz/
 
 > Based on decades of international research, including 28 years of experiments run at the Princeton Engineering Anomalies Research Lab, there is hard evidence that human intention and group experience impact random data streams through what has been coined “the consciousness field”. [This is] an invisible, subtle field (more like gravitational or electromagnetic field but also distinctly different from these), in which we all interact.
 >
@@ -12,41 +12,42 @@ Try it here: https://wyrdweb.adam.nz/
 >
 > https://gowyrd.org/faq/
 
-The Wyrd Web app takes two streams of random numbers (zeros and ones) and monitors them for trends that deviate from expected randomness (eg. they start matching each other). It can be displayed on a large TV or screen shared on a video conference, providing groups with an easy and fun way to experiment with collective intention and receive immediate, visual feedback on the session.
+Wyrdness app takes two streams of random numbers (zeros and ones) and monitors them for trends that deviate from expected randomness (eg. they start matching each other). It can be displayed on a large TV or screen shared on a video conference, providing groups with an easy and fun way to experiment with collective intention and receive immediate, visual feedback on the session.
 
-Non-random, statistical patterns are represented as a moving, shimmering orb of light. Wyrd now publicly documents that its lamp colours are associated with data structures, not universal meanings. The fun research question is what kinds of individual or group experiences seem to invite those different structures.
+Patterns of non-random behaviour are represented as a moving, shimmering orb of light. Different colours are used to represent patterns of behaviour. 
 
-Target Orb Colors (Wyrd-aligned; current code is being refactored toward this):
+## Orb Colours:
 
-- ⚫️ Baseline: no pattern is strong enough to dominate; should remain dim and slowly wander through colour
+- ⚫️ Baseline: no pattern is strong enough to dominate; should remain dim and slowly wander through colours
 - 🔴 Parallel / correlated: the two streams drift in the same direction
 - 🟠 Antiparallel / diverging: the two streams drift in opposite directions
 - 🔵 Stick together: the two streams follow unusually similar paths
 - 🟢 Pearson: Pearson correlation becomes the dominant pattern
 
-Brightness tracks overall statistical significance. When it crosses a threshold, you'll see an expanding white ring pulse. We use this as a safer, screen-share-friendly interpretation of the Wyrd Light's highest-intensity stage rather than copying the official Wow-mode white strobe effect.
+Brightness tracks overall statistical significance (brighter = more unusual). When significance crosses a threshold, you'll see an expanding white ring pulse. 
 
 There are two main settings you can use to adjust the visual experience:
 
 - **Mode (wow / mellow)** affects how dynamic the visualisation is. Mellow is intended for longer, background use. Wow is intended for groups actively watching and experimenting.
-- **Sensitivity (conservative / moderate / engaging)** affects how statistically significant an event must be. These labels map roughly to Wyrd's Advanced / Intermediate / Beginner levels, but use friendlier names.
+- **Sensitivity (conservative / moderate / engaging)** affects how statistically significant an event must be. These labels map roughly to Wyrd's Advanced / Intermediate / Beginner levels.
 
-Future versions may add Wyrd's separate **response speed** setting (1-5 seconds). For now, the public controls stay intentionally simple.
+## Feedback 
 
-Your mission, should you choose to accept it, is to explore what conditions seem to invite different patterns. 🤯 🦄 🤣
+if you use this and find it interesting or useful, I'd love hear from you. If you have suggestions for improvements please let me know.  
 
-As always, feedback is welcome. 💬
+Go Wyrd suggests that the different colours may match to different group experiences.  But if, what, and how they match is still unknown. Pay attention and see what you can figure out! :-) 
 
-# Caveats
+[I look forward to hearing from you!](mailto:adam@shand.net?subject=Feedback%20on%20Wyrdness)
 
-- This is my first vibe coded app. I used Claude/ChatGPT to attempt to reverse engineer what the Wyrd Light does from the limited information on their website (see [WYRDLIGHT.md](WYRDLIGHT.md)).
-- The math involved is beyond my expertise, so I can't validate the AI implementation.
+## Caveats
+
+- This is pure AI vibe slop. I used Claude/Codex to reverse engineer the behaviour of the Wyrd Light from the limited information available on their website (see [WYRDLIGHT.md](docs/WYRDLIGHT.md)).
+- The math involved is beyond my expertise, so I can't validate the implementation.
 - Currently, the web app uses `crypto.getRandomValues()` to generate the streams of random numbers; this is not a quantum source and does not reproduce Wyrd's stored, previously unobserved quantum random data model.
-- The current implementation is in transition: the documentation now tracks the newer public Wyrd colour/channel mapping, while the code may still contain older experimental channel names until the next refactor.
 - I'm still experimenting with visualisation and UI. Once that seems to be working well, I'll look at wiring up a quantum source.
 
-# Background
+## Background
 
-Since reading Dean Radin's latest book, The Science of Magic, I've been curious about psi phenomena. On his website, he linked to Go Wyrd and I read about their [Wyrd Light](https://gowyrd.org/wyrd-light/) which uses stored sequences of quantum random numbers to visually display when statistically unlikely things are happening. Excited, I was going to buy one … and then I saw how much they cost.
+Since reading Dean Radin's latest book, [The Science of Magic](https://www.penguin.co.nz/books/the-science-of-magic-9780593797587), I've been curious about psi phenomena. On his website he linked to Go Wyrd where I read about their [Wyrd Light](https://gowyrd.org/wyrd-light/) which uses stored sequences of quantum random numbers to visually display when statistically unlikely things are happening. Excited, I was going to buy one … and then I saw how much they cost. <sad face>
 
 Disappointed, I started thinking about building something similar. A simple web app that takes two streams of random numbers, monitors them for divergence from randomness, and provides human friendly, visual feedback when unlikely things are happening.
