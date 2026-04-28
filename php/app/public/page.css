@@ -55,7 +55,7 @@ body.wyrd-app-page .site-footer {
     backdrop-filter: blur(10px);
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     color: rgba(255, 255, 255, 0.85);
-    font-size: 13px;
+    font-size: 14px;
     user-select: none;
     z-index: 50;
 }
@@ -64,7 +64,6 @@ body.wyrd-app-page .site-footer {
     display: flex;
     gap: 16px;
     opacity: 0.6;
-    font-size: 12px;
 }
 
 .shortcut {
@@ -77,9 +76,9 @@ body.wyrd-app-page .site-footer {
     transform: translateX(-50%);
 }
 
-.state-name {
-    font-size: 16px;
-    font-weight: 500;
+.state-name,
+.bar-right > b {
+    font-weight: 700;
     letter-spacing: 0.02em;
 }
 
@@ -91,8 +90,22 @@ body.wyrd-app-page .site-footer {
 }
 
 .mode-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     font-variant-numeric: tabular-nums;
     opacity: 0.8;
+}
+
+.mode-toggle {
+    appearance: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
 }
 
 .brand {
@@ -385,7 +398,6 @@ body.wyrd-app-page .site-footer {
         justify-content: center;
         flex-wrap: wrap;
         gap: 6px 14px;
-        font-size: 11px;
     }
 
     .bar-center {
@@ -415,10 +427,6 @@ body.wyrd-app-page .site-footer {
     .bottom-bar {
         gap: 5px 12px;
     }
-
-    .mode-info {
-        font-size: 12px;
-    }
 }
 
 @media (max-width: 520px) {
@@ -428,19 +436,10 @@ body.wyrd-app-page .site-footer {
 
     .bar-left {
         gap: 5px 9px;
-        font-size: 10px;
     }
 
     .bar-right {
         gap: 9px;
-    }
-
-    .mode-info {
-        font-size: 11px;
-    }
-
-    .state-name {
-        font-size: 15px;
     }
 
     .legend-panel,

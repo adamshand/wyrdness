@@ -1418,7 +1418,7 @@
     function updateAgentPanel() {
         if (!AGENT_MODE || !el.agentPanel) return;
         const recent = state.agentLog.slice(-22);
-        el.agentPanel.textContent = ['WyrdWeb agent stream (?agent=1)', 'time tick dominant       stage sig/coh visual(par/anti/stick/pearson) walk(close:p apart:p) pAdj', ...recent.map(agentLine)].join('\n');
+        el.agentPanel.textContent = ['Wyrdness agent stream (?agent=1)', 'time tick dominant       stage sig/coh visual(par/anti/stick/pearson) walk(close:p apart:p) pAdj', ...recent.map(agentLine)].join('\n');
     }
 
     function recordAgentSnapshot(force = false) {
@@ -1542,7 +1542,7 @@
         return [columns.join(','), ...rows.map((row) => columns.map((column) => csvEscape(row[column])).join(','))].join('\n') + '\n';
     }
 
-    function openSessionLog() {
+    function openHistory() {
         recordSessionSample(true);
         const csv = sessionLogCsv();
         const blob = new Blob([csv], { type: 'text/plain;charset=utf-8' });
@@ -1551,13 +1551,14 @@
         if (win) {
             win.opener = null;
         } else {
-            console.info('WyrdWeb session log CSV:\n' + csv);
+            console.info('Wyrdness history CSV:\n' + csv);
         }
     }
 
     function syncUi() {
         el.stateName.textContent = `${DISPLAY_NAMES[state.dominant]}${getPearsonIndicator(state.pearsonSpin)}`;
-        el.modeInfo.textContent = `${state.lightMode === 'wow' ? 'Wow' : 'Mellow'} / ${SENSITIVITY_LABELS[state.sensitivity]}`;
+        el.modeToggle.textContent = state.lightMode === 'wow' ? 'Wow' : 'Mellow';
+        el.sensitivityToggle.textContent = SENSITIVITY_LABELS[state.sensitivity];
         el.legendPanel.hidden = !state.showLegend;
         el.devPanel.hidden = !state.showDev;
         el.demoOverlay.hidden = !state.demoMode;
@@ -1653,6 +1654,22 @@
         recordSessionRow('demo_stop');
     }
 
+    function cycleLightMode() {
+        const from = state.lightMode;
+        state.lightMode = state.lightMode === 'wow' ? 'mellow' : 'wow';
+        recordSessionRow('mode_change', { from, to: state.lightMode });
+        syncUi();
+    }
+
+    function cycleSensitivity() {
+        const from = state.sensitivity;
+        const order = ['conservative', 'moderate', 'engaging'];
+        const idx = order.indexOf(state.sensitivity);
+        state.sensitivity = order[(idx + 1) % order.length];
+        recordSessionRow('sensitivity_change', { from, to: state.sensitivity });
+        syncUi();
+    }
+
     function handleKeydown(e) {
         const tag = e.target?.tagName?.toLowerCase();
         if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
@@ -1661,8 +1678,8 @@
             toggleHelp();
             return;
         }
-        if (e.key === 'L' && e.shiftKey) {
-            openSessionLog();
+        if (e.key === 'h' || e.key === 'H') {
+            openHistory();
             return;
         }
         if ((e.key === 'l' || e.key === 'L') && !e.shiftKey) {
@@ -1676,19 +1693,11 @@
             return;
         }
         if (e.key === 'm' || e.key === 'M') {
-            const from = state.lightMode;
-            state.lightMode = state.lightMode === 'wow' ? 'mellow' : 'wow';
-            recordSessionRow('mode_change', { from, to: state.lightMode });
-            syncUi();
+            cycleLightMode();
             return;
         }
         if (e.key === 's' || e.key === 'S') {
-            const from = state.sensitivity;
-            const order = ['conservative', 'moderate', 'engaging'];
-            const idx = order.indexOf(state.sensitivity);
-            state.sensitivity = order[(idx + 1) % order.length];
-            recordSessionRow('sensitivity_change', { from, to: state.sensitivity });
-            syncUi();
+            cycleSensitivity();
             return;
         }
         if ((e.key === 'd' || e.key === 'D') && !e.shiftKey) {
@@ -1714,7 +1723,8 @@
         el.helpModal = document.getElementById('wyrd-help-modal');
         el.demoOverlay = document.getElementById('wyrd-demo-overlay');
         el.stateName = document.querySelector('[data-ui="stateName"]');
-        el.modeInfo = document.querySelector('[data-ui="modeInfo"]');
+        el.modeToggle = document.querySelector('[data-ui="modeToggle"]');
+        el.sensitivityToggle = document.querySelector('[data-ui="sensitivityToggle"]');
         el.demoMain = document.querySelector('[data-demo="main"]');
         el.demoPearson = document.querySelector('[data-demo="pearson"]');
         el.demoProgress = document.querySelector('[data-demo="progress"]');
@@ -1739,12 +1749,14 @@
         bufCanvas = document.createElement('canvas');
         const ctx = bufCanvas.getContext('2d');
         if (!ctx) {
-            console.error('WyrdWeb requires 2D canvas support.');
+            console.error('Wyrdness requires 2D canvas support.');
             return;
         }
         bufCtx = ctx;
 
         el.helpBackdrop.addEventListener('click', () => toggleHelp(false));
+        el.modeToggle.addEventListener('click', cycleLightMode);
+        el.sensitivityToggle.addEventListener('click', cycleSensitivity);
         el.helpModal.addEventListener('cancel', (event) => {
             event.preventDefault();
             toggleHelp(false);

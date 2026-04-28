@@ -6,15 +6,15 @@ require_once __DIR__ . '/../_site/bootstrap.php';
 
 $site = site_config();
 $page = [
-    'title' => 'WyrdWeb',
+    'title' => 'Wyrdness',
     'description' => 'A browser-based Wyrd Light inspired random-signal orb for shared focus, meetings, and experiments.',
     'body_class' => 'wyrd-app-page',
 ];
 
 ob_start();
 ?>
-<section class="wyrd-app" aria-label="WyrdWeb visualiser">
-    <canvas id="wyrd-canvas" class="wyrd-canvas" aria-label="WyrdWeb orb visualisation"></canvas>
+<section class="wyrd-app" aria-label="Wyrdness visualiser">
+    <canvas id="wyrd-canvas" class="wyrd-canvas" aria-label="Wyrdness orb visualisation"></canvas>
 
     <aside id="wyrd-dev-panel" class="dev-panel" aria-label="Debug info" hidden>
         <h3>Debug</h3>
@@ -72,9 +72,9 @@ ob_start();
 
     <div id="wyrd-help-backdrop" class="modal-backdrop" hidden></div>
     <dialog id="wyrd-help-modal" class="help-modal" aria-label="Help">
-        <h2>What is WyrdWeb?</h2>
+        <h2>What is Wyrdness?</h2>
         <p>
-            WyrdWeb visualizes patterns in random data. Two streams of random bits, 0s and 1s,
+            Wyrdness visualizes patterns in random data. Two streams of random bits, 0s and 1s,
             are continuously compared, looking for moments when they deviate from pure chance.
         </p>
         <p>
@@ -110,7 +110,7 @@ ob_start();
             <li><strong>S</strong> Sensitivity — Conservative / Moderate / Engaging</li>
             <li><strong>D</strong> Demo — start or stop demo mode</li>
             <li><strong>L</strong> Legend — toggle color legend</li>
-            <li><strong>Shift+L</strong> Session log — open a timestamped CSV log in a new tab</li>
+            <li><strong>H</strong> History — open a timestamped CSV history in a new tab</li>
             <li><strong>`</strong> Debug — show additional signal data</li>
             <li><strong>Esc</strong> Close panels or stop demo</li>
         </ul>
@@ -140,23 +140,27 @@ ob_start();
         <div class="demo-progress" data-demo="progress">1 / 5</div>
     </div>
 
-    <nav class="bottom-bar" aria-label="WyrdWeb controls">
+    <nav class="bottom-bar" aria-label="Wyrdness controls">
         <div class="bar-left">
             <span class="shortcut"><b>?</b> help</span>
             <span class="shortcut"><b>M</b> mode</span>
             <span class="shortcut"><b>S</b> sensitivity</span>
             <span class="shortcut"><b>D</b> demo</span>
             <span class="shortcut"><b>L</b> legend</span>
-            <span class="shortcut"><b>⇧L</b> log</span>
+            <span class="shortcut"><b>H</b> history</span>
             <span class="shortcut"><b>`</b> debug</span>
         </div>
         <div class="bar-center">
             <span class="state-name" data-ui="stateName">Baseline</span>
         </div>
         <div class="bar-right">
-            <span class="mode-info" data-ui="modeInfo">Mellow / Moderate</span>
-            <b>WyrdWeb</b>
-            <a title="GitHub Repository" href="https://github.com/adamshand/wyrdness" target="_blank" rel="noopener" class="brand" aria-label="WyrdWeb GitHub repository">
+            <span class="mode-info">
+                <button type="button" class="mode-toggle" data-ui="modeToggle" title="Cycle Mellow / Wow mode">Mellow</button>
+                <span aria-hidden="true">/</span>
+                <button type="button" class="mode-toggle" data-ui="sensitivityToggle" title="Cycle Conservative / Moderate / Engaging sensitivity">Moderate</button>
+            </span>
+            <b>Wyrdness</b>
+            <a title="GitHub Repository" href="https://github.com/adamshand/wyrdness" target="_blank" rel="noopener" class="brand" aria-label="Wyrdness GitHub repository">
                 <svg class="github-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                     <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
                 </svg>

@@ -9,6 +9,7 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo escape_html($pageTitle); ?></title>
     <meta name="description" content="<?php echo escape_html($pageDescription); ?>">
+    <link rel="icon" type="image/svg+xml" href="<?php echo escape_html(asset_url($site, 'favicon.svg')); ?>">
     <link rel="stylesheet" href="<?php echo escape_html(scaffold_dependency_asset_url($site, 'open-props', 'open-props.min.css')); ?>">
     <link rel="stylesheet" href="<?php echo escape_html(asset_url($site, 'base.css')); ?>">
     <?php if (is_string($pageCssUrl) && $pageCssUrl !== ''): ?>
