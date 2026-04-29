@@ -1,1 +1,287 @@
-{"version":1,"kind":"wyrdweb-signal-null-validation","createdAt":"2026-04-27T08:32:00.814Z","params":{"ticks":1000000,"warmupTicks":120,"recordedSamples":999880,"sampleBits":200,"maxLookback":120,"minSegmentLen":3,"calibration":"/Users/adam/src/wyrdness.git/tools/calibration/walk-distance-200bit-lookback120-1m.json","walkStrengthPThresholds":{"conservative":{"walkPStart":0.005,"walkPFull":0.0001},"moderate":{"walkPStart":0.02,"walkPFull":0.0003},"engaging":{"walkPStart":0.05,"walkPFull":0.001}}},"runtime":{"durationMs":39477.715832999995,"ticksPerSecond":25330.746191857572},"results":{"conservative":{"currentUncalibrated":{"counts":{"baseline":7798,"parallel":21,"antiparallel":871506,"stick_together":120555,"pearson":0},"percent":{"baseline":0.007798935872304676,"parallel":0.00002100252030243629,"antiparallel":0.8716105932711925,"stick_together":0.12056946833620034,"pearson":0}},"calibratedWalk":{"counts":{"baseline":990330,"parallel":1254,"antiparallel":3651,"stick_together":4645,"pearson":0},"percent":{"baseline":0.9904488538624635,"parallel":0.0012541504980597671,"antiparallel":0.0036514381725807096,"stick_together":0.004645557466896028,"pearson":0},"pMinQuantiles":[[0.01,0.0030126126453003336],[0.05,0.019016436081129573],[0.1,0.035412830321852384],[0.5,0.1551226762207085],[0.9,0.33300601424727777],[0.95,0.3815738292025648],[0.99,0.46825650747687564]]}},"moderate":{"currentUncalibrated":{"counts":{"baseline":1108,"parallel":53,"antiparallel":900764,"stick_together":97955,"pearson":0},"percent":{"baseline":0.0011081329759571148,"parallel":0.000053006360763291596,"antiparallel":0.9008721046525583,"stick_together":0.09796675601072129,"pearson":0}},"calibratedWalk":{"counts":{"baseline":964119,"parallel":8687,"antiparallel":16013,"stick_together":11061,"pearson":0},"percent":{"baseline":0.9642347081649798,"parallel":0.008688042565107813,"antiparallel":0.016014921790614874,"stick_together":0.011062327479297515,"pearson":0},"pMinQuantiles":[[0.01,0.0030126126453003336],[0.05,0.019016436081129573],[0.1,0.035412830321852384],[0.5,0.1551226762207085],[0.9,0.33300601424727777],[0.95,0.3815738292025648],[0.99,0.46825650747687564]]}},"engaging":{"currentUncalibrated":{"counts":{"baseline":135,"parallel":135,"antiparallel":912408,"stick_together":87202,"pearson":0},"percent":{"baseline":0.00013501620194423332,"parallel":0.00013501620194423332,"antiparallel":0.9125175021002521,"stick_together":0.08721246549585951,"pearson":0}},"calibratedWalk":{"counts":{"baseline":886799,"parallel":33706,"antiparallel":51841,"stick_together":27525,"pearson":9},"percent":{"baseline":0.8869054286514382,"parallel":0.03371004520542465,"antiparallel":0.05184722166659999,"stick_together":0.02752830339640757,"pearson":0.000009001080129615554},"pMinQuantiles":[[0.01,0.0030126126453003336],[0.05,0.019016436081129573],[0.1,0.035412830321852384],[0.5,0.1551226762207085],[0.9,0.33300601424727777],[0.95,0.3815738292025648],[0.99,0.46825650747687564]]}}}}
+{
+  "version": 1,
+  "kind": "wyrdweb-signal-null-validation",
+  "createdAt": "2026-04-29T00:19:49.413Z",
+  "params": {
+    "ticks": 1000000,
+    "warmupTicks": 120,
+    "recordedSamples": 999880,
+    "sampleBits": 200,
+    "maxLookback": 120,
+    "minSegmentLen": 3,
+    "calibration": "tools/calibration/walk-distance-200bit-lookback120-1m.json",
+    "stackCalibration": "tools/calibration/signal-stack-200bit-lookback120-1m.json",
+    "channelStrengthPThresholds": {
+      "conservative": {
+        "channelPStart": 0.005,
+        "channelPFull": 0.0001
+      },
+      "moderate": {
+        "channelPStart": 0.02,
+        "channelPFull": 0.0003
+      },
+      "engaging": {
+        "channelPStart": 0.05,
+        "channelPFull": 0.001
+      }
+    }
+  },
+  "runtime": {
+    "durationMs": 22399.858958,
+    "ticksPerSecond": 44643.138239174266
+  },
+  "results": {
+    "conservative": {
+      "currentUncalibrated": {
+        "counts": {
+          "baseline": 7753,
+          "parallel": 20,
+          "antiparallel": 871202,
+          "stick_together": 120905,
+          "pearson": 0
+        },
+        "percent": {
+          "baseline": 0.007753930471656599,
+          "parallel": 0.000020002400288034563,
+          "antiparallel": 0.8713065567868145,
+          "stick_together": 0.12091951034124095,
+          "pearson": 0
+        }
+      },
+      "calibratedRuntime": {
+        "counts": {
+          "baseline": 978711,
+          "parallel": 6334,
+          "antiparallel": 7030,
+          "stick_together": 4679,
+          "pearson": 3126
+        },
+        "percent": {
+          "baseline": 0.9788284594151299,
+          "parallel": 0.0063347601712205465,
+          "antiparallel": 0.00703084370124415,
+          "stick_together": 0.004679561547385686,
+          "pearson": 0.0031263751650198023
+        },
+        "pMinQuantiles": [
+          [
+            0.01,
+            0.0015460732397435213
+          ],
+          [
+            0.05,
+            0.008363650985009269
+          ],
+          [
+            0.1,
+            0.016529094100464478
+          ],
+          [
+            0.5,
+            0.09587900545943116
+          ],
+          [
+            0.9,
+            0.24230211331200885
+          ],
+          [
+            0.95,
+            0.28075822125145067
+          ],
+          [
+            0.99,
+            0.3521267003349426
+          ]
+        ],
+        "oldScalarPOverallObservedRates": {
+          "0.5": 0.31304656558787053,
+          "0.25": 0.16653598431811817,
+          "0.1": 0.06865823898867864,
+          "0.05": 0.03481717806136737,
+          "0.02": 0.013970676481177741,
+          "0.01": 0.007576909229107493,
+          "0.005": 0.0033604032483898066,
+          "0.001": 0.0007420890506860823
+        },
+        "pOverallObservedRates": {
+          "0.5": 0.4995439452734328,
+          "0.25": 0.24793475217026043,
+          "0.1": 0.09697963755650678,
+          "0.05": 0.048753850462055444,
+          "0.02": 0.018568228187382487,
+          "0.01": 0.009551146137536505,
+          "0.005": 0.00465855902708325,
+          "0.001": 0.0009651158138976677
+        }
+      }
+    },
+    "moderate": {
+      "currentUncalibrated": {
+        "counts": {
+          "baseline": 1032,
+          "parallel": 119,
+          "antiparallel": 899880,
+          "stick_together": 98849,
+          "pearson": 0
+        },
+        "percent": {
+          "baseline": 0.0010321238548625835,
+          "parallel": 0.00011901428171380565,
+          "antiparallel": 0.8999879985598271,
+          "stick_together": 0.09886086330359643,
+          "pearson": 0
+        }
+      },
+      "calibratedRuntime": {
+        "counts": {
+          "baseline": 925726,
+          "parallel": 24195,
+          "antiparallel": 27219,
+          "stick_together": 11020,
+          "pearson": 11720
+        },
+        "percent": {
+          "baseline": 0.9258371004520543,
+          "parallel": 0.024197903748449812,
+          "antiparallel": 0.02722226667200064,
+          "stick_together": 0.011021322558707044,
+          "pearson": 0.011721406568788255
+        },
+        "pMinQuantiles": [
+          [
+            0.01,
+            0.0015460732397435213
+          ],
+          [
+            0.05,
+            0.008363650985009269
+          ],
+          [
+            0.1,
+            0.016529094100464478
+          ],
+          [
+            0.5,
+            0.09587900545943116
+          ],
+          [
+            0.9,
+            0.24230211331200885
+          ],
+          [
+            0.95,
+            0.28075822125145067
+          ],
+          [
+            0.99,
+            0.3521267003349426
+          ]
+        ],
+        "oldScalarPOverallObservedRates": {
+          "0.5": 0.31304656558787053,
+          "0.25": 0.16653598431811817,
+          "0.1": 0.06865823898867864,
+          "0.05": 0.03481717806136737,
+          "0.02": 0.013970676481177741,
+          "0.01": 0.007576909229107493,
+          "0.005": 0.0033604032483898066,
+          "0.001": 0.0007420890506860823
+        },
+        "pOverallObservedRates": {
+          "0.5": 0.4995439452734328,
+          "0.25": 0.24793475217026043,
+          "0.1": 0.09697963755650678,
+          "0.05": 0.048753850462055444,
+          "0.02": 0.018568228187382487,
+          "0.01": 0.009551146137536505,
+          "0.005": 0.00465855902708325,
+          "0.001": 0.0009651158138976677
+        }
+      }
+    },
+    "engaging": {
+      "currentUncalibrated": {
+        "counts": {
+          "baseline": 147,
+          "parallel": 271,
+          "antiparallel": 911339,
+          "stick_together": 88123,
+          "pearson": 0
+        },
+        "percent": {
+          "baseline": 0.00014701764211705405,
+          "parallel": 0.00027103252390286834,
+          "antiparallel": 0.9114483738048565,
+          "stick_together": 0.0881335760291235,
+          "pearson": 0
+        }
+      },
+      "calibratedRuntime": {
+        "counts": {
+          "baseline": 801006,
+          "parallel": 65821,
+          "antiparallel": 75391,
+          "stick_together": 26659,
+          "pearson": 31003
+        },
+        "percent": {
+          "baseline": 0.8011021322558707,
+          "parallel": 0.06582889946793616,
+          "antiparallel": 0.0754000480057607,
+          "stick_together": 0.026662199463935672,
+          "pearson": 0.03100672080649678
+        },
+        "pMinQuantiles": [
+          [
+            0.01,
+            0.0015460732397435213
+          ],
+          [
+            0.05,
+            0.008363650985009269
+          ],
+          [
+            0.1,
+            0.016529094100464478
+          ],
+          [
+            0.5,
+            0.09587900545943116
+          ],
+          [
+            0.9,
+            0.24230211331200885
+          ],
+          [
+            0.95,
+            0.28075822125145067
+          ],
+          [
+            0.99,
+            0.3521267003349426
+          ]
+        ],
+        "oldScalarPOverallObservedRates": {
+          "0.5": 0.31304656558787053,
+          "0.25": 0.16653598431811817,
+          "0.1": 0.06865823898867864,
+          "0.05": 0.03481717806136737,
+          "0.02": 0.013970676481177741,
+          "0.01": 0.007576909229107493,
+          "0.005": 0.0033604032483898066,
+          "0.001": 0.0007420890506860823
+        },
+        "pOverallObservedRates": {
+          "0.5": 0.4995439452734328,
+          "0.25": 0.24793475217026043,
+          "0.1": 0.09697963755650678,
+          "0.05": 0.048753850462055444,
+          "0.02": 0.018568228187382487,
+          "0.01": 0.009551146137536505,
+          "0.005": 0.00465855902708325,
+          "0.001": 0.0009651158138976677
+        }
+      }
+    }
+  }
+}

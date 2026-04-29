@@ -6,40 +6,43 @@ import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 const DEFAULT_CALIBRATION = 'tools/calibration/walk-distance-200bit-lookback120-1m.json';
+const DEFAULT_STACK_CALIBRATION = 'tools/calibration/signal-stack-200bit-lookback120-1m.json';
+const P_NULL_MIN_CHANNELS = 0.11;
+const P_CHECK_THRESHOLDS = [0.5, 0.25, 0.1, 0.05, 0.02, 0.01, 0.005, 0.001];
 const CHANNELS = ['baseline', 'parallel', 'antiparallel', 'stick_together', 'pearson'];
 const SENSITIVITY_PRESETS = {
 	conservative: {
-		strengthZStart: 2.4,
-		strengthZFull: 3.5,
-		stickZStart: 3.4,
-		stickZFull: 4.5,
-		pearsonRStart: 0.25,
-		pearsonRFull: 0.5,
+		legacyZStart: 2.4,
+		legacyZFull: 3.5,
+		legacyStickZStart: 3.4,
+		legacyStickZFull: 4.5,
+		legacyPearsonRStart: 0.25,
+		legacyPearsonRFull: 0.5,
 		dominanceThreshold: 0.12,
-		walkPStart: 0.005,
-		walkPFull: 0.0001
+		channelPStart: 0.005,
+		channelPFull: 0.0001
 	},
 	moderate: {
-		strengthZStart: 2.0,
-		strengthZFull: 3.2,
-		stickZStart: 2.9,
-		stickZFull: 4.0,
-		pearsonRStart: 0.2,
-		pearsonRFull: 0.45,
+		legacyZStart: 2.0,
+		legacyZFull: 3.2,
+		legacyStickZStart: 2.9,
+		legacyStickZFull: 4.0,
+		legacyPearsonRStart: 0.2,
+		legacyPearsonRFull: 0.45,
 		dominanceThreshold: 0.12,
-		walkPStart: 0.02,
-		walkPFull: 0.0003
+		channelPStart: 0.02,
+		channelPFull: 0.0003
 	},
 	engaging: {
-		strengthZStart: 1.7,
-		strengthZFull: 3.0,
-		stickZStart: 2.6,
-		stickZFull: 3.8,
-		pearsonRStart: 0.16,
-		pearsonRFull: 0.4,
+		legacyZStart: 1.7,
+		legacyZFull: 3.0,
+		legacyStickZStart: 2.6,
+		legacyStickZFull: 3.8,
+		legacyPearsonRStart: 0.16,
+		legacyPearsonRFull: 0.4,
 		dominanceThreshold: 0.1,
-		walkPStart: 0.05,
-		walkPFull: 0.001
+		channelPStart: 0.05,
+		channelPFull: 0.001
 	}
 };
 
@@ -47,11 +50,12 @@ function usage() {
 	return (
 		`Usage: node tools/validate-signal-null.js [options]\n\n` +
 		`Runs a synthetic null validation of the full detector stack. It compares\n` +
-		`the current uncalibrated walk-distance wiring against calibrated walk\n` +
-		`Channel 3min/3max approximations loaded from the calibration JSON.\n\n` +
+		`the legacy uncalibrated visual wiring against the calibrated runtime stack\n` +
+		`using walk and full-stack/channel calibration JSON files.\n\n` +
 		`Options:\n` +
 		`  --ticks <n>             Total ticks to simulate. Default: 100000\n` +
 		`  --calibration <path>    Walk calibration JSON. Default: ${DEFAULT_CALIBRATION}\n` +
+		`  --stack-calibration <p> Full-stack pMin calibration JSON. Default: ${DEFAULT_STACK_CALIBRATION}\n` +
 		`  --sample-bits <n>       Bits per stream per tick. Default: from calibration\n` +
 		`  --max-lookback <n>      Starting-point search depth. Default: from calibration\n` +
 		`  --min-segment-len <n>   Minimum segment length. Default: from calibration\n` +
@@ -66,6 +70,7 @@ function parseArgs(argv) {
 	const options = {
 		ticks: 100_000,
 		calibration: DEFAULT_CALIBRATION,
+		stackCalibration: DEFAULT_STACK_CALIBRATION,
 		sampleBits: null,
 		maxLookback: null,
 		minSegmentLen: null,
@@ -87,6 +92,9 @@ function parseArgs(argv) {
 				break;
 			case '--calibration':
 				options.calibration = next();
+				break;
+			case '--stack-calibration':
+				options.stackCalibration = next();
 				break;
 			case '--sample-bits':
 				options.sampleBits = Number(next());
@@ -148,13 +156,11 @@ function sampleTick(byteStream, sampleBits) {
 	let sumX = 0;
 	let sumY = 0;
 	let sumXY = 0;
-	let agree = 0;
 
 	for (let i = 0; i < sampleBits; i++) {
 		const pairBit = i * 2;
 		const a = bitAt(buffer, baseByte * 8 + pairBit);
 		const b = bitAt(buffer, baseByte * 8 + pairBit + 1);
-		if (a === b) agree++;
 		const x = a === 1 ? 1 : -1;
 		const y = b === 1 ? 1 : -1;
 		sumX += x;
@@ -162,7 +168,7 @@ function sampleTick(byteStream, sampleBits) {
 		sumXY += x * y;
 	}
 
-	return { sumX, sumY, sumXY, agree };
+	return { sumX, sumY, sumXY };
 }
 
 function clamp01(v) {
@@ -191,10 +197,6 @@ function twoSidedPFromZ(z) {
 	return Math.max(1e-18, Math.min(1, 2 * tail));
 }
 
-function oneSidedPFromZ(z) {
-	return Math.max(1e-18, Math.min(1, 1 - normalCdf(z)));
-}
-
 function strengthFromZ(z, zStart, zFull) {
 	return clamp01((Math.abs(z) - zStart) / (zFull - zStart));
 }
@@ -205,19 +207,6 @@ function strengthFromP(p, pStart, pFull) {
 	const full = -Math.log10(pFull);
 	const value = -Math.log10(safeP);
 	return clamp01((value - start) / (full - start));
-}
-
-function findOptimalStartingPointAgreement(cumSum, currentIdx, bitsPerTick, lookback, minLen) {
-	let bestZ = 0;
-	const endSum = cumSum[currentIdx] ?? 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const delta = endSum - (cumSum[s] ?? 0);
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const z = delta / Math.sqrt(bitSpan / 4);
-		if (z > bestZ) bestZ = z;
-	}
-	return bestZ;
 }
 
 function findOptimalStartingPointCorrelated(
@@ -325,9 +314,14 @@ function walkDistanceScores(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback,
 }
 
 function prepareTailTable(rows, mode) {
-	const mapped = rows
-		.map(([p, threshold]) => ({ p, threshold }))
-		.filter((row) => Number.isFinite(row.p) && Number.isFinite(row.threshold) && row.p > 0)
+	const byThreshold = new Map();
+	for (const [p, threshold] of rows) {
+		if (!Number.isFinite(p) || !Number.isFinite(threshold) || p <= 0) continue;
+		const previous = byThreshold.get(threshold);
+		byThreshold.set(threshold, previous == null ? p : Math.max(previous, p));
+	}
+	const mapped = [...byThreshold.entries()]
+		.map(([threshold, p]) => ({ p, threshold }))
 		.sort((a, b) => a.threshold - b.threshold);
 	if (mode === 'upper') return mapped;
 	return mapped;
@@ -400,6 +394,16 @@ function countsToPercent(counts, total) {
 	return Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, total > 0 ? v / total : 0]));
 }
 
+function observedRates(values, thresholds) {
+	const rates = {};
+	for (const threshold of thresholds) {
+		let count = 0;
+		for (const value of values) if (value <= threshold) count++;
+		rates[threshold] = values.length > 0 ? count / values.length : 0;
+	}
+	return rates;
+}
+
 function printSummary(report) {
 	console.log('\nSignal null validation summary');
 	console.log('------------------------------');
@@ -412,12 +416,13 @@ function printSummary(report) {
 		const row = report.results[sensitivity];
 		console.log(`\n${sensitivity}`);
 		console.log('  current uncalibrated dominance:', row.currentUncalibrated.percent);
-		console.log('  calibrated walk dominance:     ', row.calibratedWalk.percent);
+		console.log('  calibrated runtime dominance:  ', row.calibratedRuntime.percent);
 		console.log('  calibrated pMin q50/q05/q01:   ', {
-			q50: row.calibratedWalk.pMinQuantiles.find(([p]) => p === 0.5)?.[1],
-			q05: row.calibratedWalk.pMinQuantiles.find(([p]) => p === 0.05)?.[1],
-			q01: row.calibratedWalk.pMinQuantiles.find(([p]) => p === 0.01)?.[1]
+			q50: row.calibratedRuntime.pMinQuantiles.find(([p]) => p === 0.5)?.[1],
+			q05: row.calibratedRuntime.pMinQuantiles.find(([p]) => p === 0.05)?.[1],
+			q01: row.calibratedRuntime.pMinQuantiles.find(([p]) => p === 0.01)?.[1]
 		});
+		console.log('  full-stack p overall observed: ', row.calibratedRuntime.pOverallObservedRates);
 	}
 }
 
@@ -425,6 +430,8 @@ function main() {
 	const options = parseArgs(process.argv);
 	const calibrationPath = resolve(options.calibration);
 	const calibration = JSON.parse(readFileSync(calibrationPath, 'utf8'));
+	const stackCalibrationPath = resolve(options.stackCalibration);
+	const stackCalibration = JSON.parse(readFileSync(stackCalibrationPath, 'utf8'));
 	const sampleBits = Math.floor(options.sampleBits ?? calibration.params.sampleBits);
 	const maxLookback = Math.floor(options.maxLookback ?? calibration.params.maxLookback);
 	const minSegmentLen = Math.floor(options.minSegmentLen ?? calibration.params.minSegmentLen);
@@ -436,7 +443,14 @@ function main() {
 		maxLookback !== calibration.params.maxLookback ||
 		minSegmentLen !== calibration.params.minSegmentLen
 	) {
-		console.warn('Warning: runtime detector settings do not match the calibration table.');
+		console.warn('Warning: runtime detector settings do not match the walk calibration table.');
+	}
+	if (
+		sampleBits !== stackCalibration.params.sampleBits ||
+		maxLookback !== stackCalibration.params.maxLookback ||
+		minSegmentLen !== stackCalibration.params.minSegmentLen
+	) {
+		console.warn('Warning: runtime detector settings do not match the full-stack calibration table.');
 	}
 
 	const closeTable = prepareTailTable(
@@ -447,6 +461,12 @@ function main() {
 		calibration.walkDistance.separateRatio.upperTailThresholds,
 		'upper'
 	);
+	const corrHighTable = prepareTailTable(stackCalibration.signal.corrHighZ.upperTailThresholds, 'upper');
+	const corrLowTable = prepareTailTable(stackCalibration.signal.corrLowZ.upperTailThresholds, 'upper');
+	const antiAbTable = prepareTailTable(stackCalibration.signal.antiAbZ.upperTailThresholds, 'upper');
+	const antiBaTable = prepareTailTable(stackCalibration.signal.antiBaZ.upperTailThresholds, 'upper');
+	const pearsonTable = prepareTailTable(stackCalibration.signal.pearsonAbsZ.upperTailThresholds, 'upper');
+	const pMinTable = prepareTailTable(stackCalibration.signal.pMinRaw.lowerTailThresholds, 'lower');
 	const recordedSamples = options.ticks - warmup;
 	const stateBySensitivity = Object.fromEntries(
 		Object.keys(SENSITIVITY_PRESETS).map((sensitivity) => [
@@ -454,14 +474,15 @@ function main() {
 			{
 				currentCounts: zeroCounts(),
 				calibratedCounts: zeroCounts(),
-				pMin: new Float64Array(recordedSamples)
+				pMin: new Float64Array(recordedSamples),
+				oldScalarPOverall: new Float64Array(recordedSamples),
+				pOverall: new Float64Array(recordedSamples)
 			}
 		])
 	);
 
 	let cumSumA = [0];
 	let cumSumB = [0];
-	let cumSumAgree = [0];
 	let cumSumXY = [0];
 	const maxStoredTicks = maxLookback + 20;
 	const byteStream = new RandomByteStream();
@@ -472,12 +493,10 @@ function main() {
 		const sample = sampleTick(byteStream, sampleBits);
 		cumSumA.push((cumSumA[cumSumA.length - 1] ?? 0) + sample.sumX);
 		cumSumB.push((cumSumB[cumSumB.length - 1] ?? 0) + sample.sumY);
-		cumSumAgree.push((cumSumAgree[cumSumAgree.length - 1] ?? 0) + (sample.agree - sampleBits / 2));
 		cumSumXY.push((cumSumXY[cumSumXY.length - 1] ?? 0) + sample.sumXY);
 		if (cumSumA.length > maxStoredTicks) {
 			cumSumA = cumSumA.slice(-maxStoredTicks);
 			cumSumB = cumSumB.slice(-maxStoredTicks);
-			cumSumAgree = cumSumAgree.slice(-maxStoredTicks);
 			cumSumXY = cumSumXY.slice(-maxStoredTicks);
 		}
 		if (tick <= warmup) continue;
@@ -494,13 +513,6 @@ function main() {
 		const anti = findOptimalStartingPointAnti(
 			cumSumA,
 			cumSumB,
-			currentIdx,
-			sampleBits,
-			maxLookback,
-			minSegmentLen
-		);
-		const stickAgreeZ = findOptimalStartingPointAgreement(
-			cumSumAgree,
 			currentIdx,
 			sampleBits,
 			maxLookback,
@@ -525,56 +537,60 @@ function main() {
 		);
 		const pClose = empiricalTailP(walk.closeRatio, closeTable, 'lower');
 		const pSeparate = empiricalTailP(walk.separateRatio, separateTable, 'upper');
+		const pCorrHigh = empiricalTailP(corr.highZ, corrHighTable, 'upper');
+		const pCorrLow = empiricalTailP(corr.lowZ, corrLowTable, 'upper');
+		const pAntiAb = empiricalTailP(anti.abZ, antiAbTable, 'upper');
+		const pAntiBa = empiricalTailP(anti.baZ, antiBaTable, 'upper');
+		const pPearson = empiricalTailP(Math.abs(pearson.z), pearsonTable, 'upper');
 
 		for (const [sensitivity, preset] of Object.entries(SENSITIVITY_PRESETS)) {
 			const currentVisual = {
 				parallel: Math.max(
-					strengthFromZ(corr.highZ, preset.strengthZStart, preset.strengthZFull),
-					strengthFromZ(corr.lowZ, preset.strengthZStart, preset.strengthZFull)
+					strengthFromZ(corr.highZ, preset.legacyZStart, preset.legacyZFull),
+					strengthFromZ(corr.lowZ, preset.legacyZStart, preset.legacyZFull)
 				),
 				antiparallel: Math.max(
-					strengthFromZ(anti.abZ, preset.strengthZStart, preset.strengthZFull),
-					strengthFromZ(anti.baZ, preset.strengthZStart, preset.strengthZFull),
-					strengthFromZ(walk.separateLegacyZ, preset.stickZStart, preset.stickZFull)
+					strengthFromZ(anti.abZ, preset.legacyZStart, preset.legacyZFull),
+					strengthFromZ(anti.baZ, preset.legacyZStart, preset.legacyZFull),
+					strengthFromZ(walk.separateLegacyZ, preset.legacyStickZStart, preset.legacyStickZFull)
 				),
-				stick_together: strengthFromZ(walk.closeLegacyZ, preset.stickZStart, preset.stickZFull),
+				stick_together: strengthFromZ(walk.closeLegacyZ, preset.legacyStickZStart, preset.legacyStickZFull),
 				pearson: clamp01(
-					(Math.abs(pearson.r) - preset.pearsonRStart) /
-						(preset.pearsonRFull - preset.pearsonRStart)
+					(Math.abs(pearson.r) - preset.legacyPearsonRStart) /
+						(preset.legacyPearsonRFull - preset.legacyPearsonRStart)
 				)
 			};
 
 			const calibratedVisual = {
-				parallel: currentVisual.parallel,
-				antiparallel: Math.max(
-					strengthFromZ(anti.abZ, preset.strengthZStart, preset.strengthZFull),
-					strengthFromZ(anti.baZ, preset.strengthZStart, preset.strengthZFull),
-					strengthFromP(pSeparate, preset.walkPStart, preset.walkPFull)
+				parallel: Math.max(
+					strengthFromP(pCorrHigh, preset.channelPStart, preset.channelPFull),
+					strengthFromP(pCorrLow, preset.channelPStart, preset.channelPFull)
 				),
-				stick_together: strengthFromP(pClose, preset.walkPStart, preset.walkPFull),
-				pearson: currentVisual.pearson
+				antiparallel: Math.max(
+					strengthFromP(pAntiAb, preset.channelPStart, preset.channelPFull),
+					strengthFromP(pAntiBa, preset.channelPStart, preset.channelPFull),
+					strengthFromP(pSeparate, preset.channelPStart, preset.channelPFull)
+				),
+				stick_together: strengthFromP(pClose, preset.channelPStart, preset.channelPFull),
+				pearson: strengthFromP(pPearson, preset.channelPStart, preset.channelPFull)
 			};
 
 			const bucket = stateBySensitivity[sensitivity];
 			bucket.currentCounts[chooseDominant(currentVisual, preset.dominanceThreshold)]++;
 			bucket.calibratedCounts[chooseDominant(calibratedVisual, preset.dominanceThreshold)]++;
 
-			const pCorrHigh = corr.highZ !== 0 ? twoSidedPFromZ(corr.highZ) : 1;
-			const pCorrLow = corr.lowZ !== 0 ? twoSidedPFromZ(corr.lowZ) : 1;
-			const pAntiAb = anti.abZ !== 0 ? twoSidedPFromZ(anti.abZ) : 1;
-			const pAntiBa = anti.baZ !== 0 ? twoSidedPFromZ(anti.baZ) : 1;
-			const pStickAgree = Math.min(1, (stickAgreeZ > 0 ? oneSidedPFromZ(stickAgreeZ) : 1) / 0.05);
-			const pPearson = Math.min(1, (pearson.z !== 0 ? twoSidedPFromZ(pearson.z) : 1) / 0.016);
-			bucket.pMin[recorded] = Math.min(
+			const pMinRuntime = Math.min(
 				pCorrHigh,
 				pCorrLow,
 				pAntiAb,
 				pAntiBa,
-				pStickAgree,
 				pClose,
 				pSeparate,
 				pPearson
 			);
+			bucket.pMin[recorded] = pMinRuntime;
+			bucket.oldScalarPOverall[recorded] = Math.min(1, pMinRuntime / P_NULL_MIN_CHANNELS);
+			bucket.pOverall[recorded] = empiricalTailP(pMinRuntime, pMinTable, 'lower');
 		}
 		recorded++;
 	}
@@ -587,10 +603,12 @@ function main() {
 				counts: bucket.currentCounts,
 				percent: countsToPercent(bucket.currentCounts, recordedSamples)
 			},
-			calibratedWalk: {
+			calibratedRuntime: {
 				counts: bucket.calibratedCounts,
 				percent: countsToPercent(bucket.calibratedCounts, recordedSamples),
-				pMinQuantiles: quantileTable(bucket.pMin)
+				pMinQuantiles: quantileTable(bucket.pMin),
+				oldScalarPOverallObservedRates: observedRates(bucket.oldScalarPOverall, P_CHECK_THRESHOLDS),
+				pOverallObservedRates: observedRates(bucket.pOverall, P_CHECK_THRESHOLDS)
 			}
 		};
 	}
@@ -606,11 +624,12 @@ function main() {
 			sampleBits,
 			maxLookback,
 			minSegmentLen,
-			calibration: calibrationPath,
-			walkStrengthPThresholds: Object.fromEntries(
+			calibration: options.calibration,
+			stackCalibration: options.stackCalibration,
+			channelStrengthPThresholds: Object.fromEntries(
 				Object.entries(SENSITIVITY_PRESETS).map(([key, value]) => [
 					key,
-					{ walkPStart: value.walkPStart, walkPFull: value.walkPFull }
+					{ channelPStart: value.channelPStart, channelPFull: value.channelPFull }
 				])
 			)
 		},

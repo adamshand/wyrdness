@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "kind": "wyrdweb-signal-power-validation",
+  "createdAt": "2026-04-29T00:21:08.924Z",
+  "params": {
+    "ticks": 5000,
+    "sampleBits": 200,
+    "maxLookback": 120,
+    "minSegmentLen": 3
+  },
+  "results": {
+    "parallel_high": {
+      "expect": "parallel",
+      "counts": {
+        "baseline": 0,
+        "parallel": 4880,
+        "antiparallel": 0,
+        "stick_together": 0,
+        "pearson": 0
+      },
+      "percent": {
+        "baseline": 0,
+        "parallel": 1,
+        "antiparallel": 0,
+        "stick_together": 0,
+        "pearson": 0
+      }
+    },
+    "parallel_low": {
+      "expect": "parallel",
+      "counts": {
+        "baseline": 0,
+        "parallel": 4880,
+        "antiparallel": 0,
+        "stick_together": 0,
+        "pearson": 0
+      },
+      "percent": {
+        "baseline": 0,
+        "parallel": 1,
+        "antiparallel": 0,
+        "stick_together": 0,
+        "pearson": 0
+      }
+    },
+    "anti_ab": {
+      "expect": "antiparallel",
+      "counts": {
+        "baseline": 0,
+        "parallel": 0,
+        "antiparallel": 4880,
+        "stick_together": 0,
+        "pearson": 0
+      },
+      "percent": {
+        "baseline": 0,
+        "parallel": 0,
+        "antiparallel": 1,
+        "stick_together": 0,
+        "pearson": 0
+      }
+    },
+    "anti_ba": {
+      "expect": "antiparallel",
+      "counts": {
+        "baseline": 0,
+        "parallel": 0,
+        "antiparallel": 4880,
+        "stick_together": 0,
+        "pearson": 0
+      },
+      "percent": {
+        "baseline": 0,
+        "parallel": 0,
+        "antiparallel": 1,
+        "stick_together": 0,
+        "pearson": 0
+      }
+    },
+    "stick_together": {
+      "expect": "stick_together",
+      "counts": {
+        "baseline": 0,
+        "parallel": 367,
+        "antiparallel": 0,
+        "stick_together": 4513,
+        "pearson": 0
+      },
+      "percent": {
+        "baseline": 0,
+        "parallel": 0.07520491803278688,
+        "antiparallel": 0,
+        "stick_together": 0.9247950819672132,
+        "pearson": 0
+      }
+    },
+    "pearson_positive": {
+      "expect": "pearson",
+      "counts": {
+        "baseline": 0,
+        "parallel": 6,
+        "antiparallel": 0,
+        "stick_together": 7,
+        "pearson": 4867
+      },
+      "percent": {
+        "baseline": 0,
+        "parallel": 0.0012295081967213116,
+        "antiparallel": 0,
+        "stick_together": 0.0014344262295081967,
+        "pearson": 0.9973360655737705
+      }
+    },
+    "pearson_negative": {
+      "expect": "pearson",
+      "counts": {
+        "baseline": 0,
+        "parallel": 0,
+        "antiparallel": 2,
+        "stick_together": 1,
+        "pearson": 4877
+      },
+      "percent": {
+        "baseline": 0,
+        "parallel": 0,
+        "antiparallel": 0.0004098360655737705,
+        "stick_together": 0.00020491803278688525,
+        "pearson": 0.9993852459016394
+      }
+    }
+  }
+}

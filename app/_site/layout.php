@@ -16,6 +16,12 @@ declare(strict_types=1);
         <link rel="stylesheet" href="<?php echo escape_html($pageCssUrl); ?>">
     <?php endif; ?>
     <script src="<?php echo escape_html(scaffold_dependency_asset_url($site, 'htmx', 'htmx.min.js')); ?>" defer></script>
+    <?php if (isset($signalCoreJsUrl) && is_string($signalCoreJsUrl) && $signalCoreJsUrl !== ''): ?>
+        <script src="<?php echo escape_html($signalCoreJsUrl); ?>" defer></script>
+    <?php endif; ?>
+    <?php if (isset($calibrationJsUrl) && is_string($calibrationJsUrl) && $calibrationJsUrl !== ''): ?>
+        <script src="<?php echo escape_html($calibrationJsUrl); ?>" defer></script>
+    <?php endif; ?>
     <?php if (is_string($pageJsUrl) && $pageJsUrl !== ''): ?>
         <script src="<?php echo escape_html($pageJsUrl); ?>" defer></script>
     <?php endif; ?>

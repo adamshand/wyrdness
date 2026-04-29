@@ -118,9 +118,9 @@ ob_start();
         <h3>What is sensitivity?</h3>
         <p>Sensitivity controls how often patterns appear under pure randomness:</p>
         <ul>
-            <li><strong>Conservative</strong> — rare events, roughly one per ten minutes.</li>
-            <li><strong>Moderate</strong> — balanced, roughly one per three minutes.</li>
-            <li><strong>Engaging</strong> — more frequent events, good for demos.</li>
+            <li><strong>Conservative</strong> — calmer colour changes and stricter channel activation.</li>
+            <li><strong>Moderate</strong> — balanced colour responsiveness for normal sessions.</li>
+            <li><strong>Engaging</strong> — more frequent colour changes, good for demos.</li>
         </ul>
 
         <h3>Why does this matter?</h3>

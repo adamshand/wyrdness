@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "kind": "wyrdweb-session-event-null-validation",
+  "createdAt": "2026-04-29T00:20:58.337Z",
+  "params": {
+    "sessions": 200,
+    "minutes": 60,
+    "sessionTicks": 3600,
+    "prewarmTicks": 120,
+    "bootSeconds": 5,
+    "bootTicks": 5,
+    "updatesPerSec": 1,
+    "sampleBits": 200,
+    "maxLookback": 120,
+    "minSegmentLen": 3,
+    "walkCalibration": "tools/calibration/walk-distance-200bit-lookback120-1m.json",
+    "stackCalibration": "tools/calibration/signal-stack-200bit-lookback120-1m.json",
+    "stageThresholds": {
+      "stage1": 0.18,
+      "stage2": 0.52,
+      "stage3": 0.72
+    },
+    "randomSource": "node:crypto.randomBytes",
+    "note": "Detector is prewarmed per session; visual smoothing and pulse logic start from zero at session start."
+  },
+  "runtime": {
+    "durationMs": 14970.748249999999,
+    "ticksPerSecond": 49696.9147817979
+  },
+  "results": {
+    "modes": {
+      "wow": {
+        "stageHitRates": {
+          "stage1": {
+            "sessions": 200,
+            "fraction": 1
+          },
+          "stage2": {
+            "sessions": 58,
+            "fraction": 0.29
+          },
+          "stage3": {
+            "sessions": 6,
+            "fraction": 0.03
+          }
+        },
+        "pulsesPerSession": {
+          "mean": 0.03,
+          "q50": 0,
+          "q90": 0,
+          "q95": 0,
+          "q99": 1,
+          "max": 1
+        },
+        "pulsesPerHourMean": 0.03,
+        "maxSigEnergyRender": {
+          "mean": 0.48775585819576284,
+          "q50": 0.4644861217867631,
+          "q90": 0.6478874388396908,
+          "q95": 0.6868331379121235,
+          "q99": 0.7319481670110642,
+          "max": 0.7399975037922225
+        },
+        "stageSeconds": {
+          "stage1Plus": {
+            "mean": 231.01,
+            "q50": 216,
+            "q90": 354,
+            "q95": 395,
+            "q99": 483,
+            "max": 581,
+            "meanFraction": 0.06416944444444445
+          },
+          "stage2Plus": {
+            "mean": 3.615,
+            "q50": 0,
+            "q90": 9,
+            "q95": 22,
+            "q99": 40,
+            "max": 81,
+            "meanFraction": 0.0010041666666666667
+          },
+          "stage3": {
+            "mean": 0.17,
+            "q50": 0,
+            "q90": 0,
+            "q95": 0,
+            "q99": 4,
+            "max": 18,
+            "meanFraction": 0.00004722222222222223
+          }
+        }
+      },
+      "mellow": {
+        "stageHitRates": {
+          "stage1": {
+            "sessions": 200,
+            "fraction": 1
+          },
+          "stage2": {
+            "sessions": 43,
+            "fraction": 0.215
+          },
+          "stage3": {
+            "sessions": 2,
+            "fraction": 0.01
+          }
+        },
+        "pulsesPerSession": {
+          "mean": 0.01,
+          "q50": 0,
+          "q90": 0,
+          "q95": 0,
+          "q99": 0,
+          "max": 1
+        },
+        "pulsesPerHourMean": 0.01,
+        "maxSigEnergyRender": {
+          "mean": 0.449781984145023,
+          "q50": 0.428389646367326,
+          "q90": 0.609605790529564,
+          "q95": 0.6748397129665764,
+          "q99": 0.7186877873655623,
+          "max": 0.739863605625681
+        },
+        "stageSeconds": {
+          "stage1Plus": {
+            "mean": 210.34,
+            "q50": 194,
+            "q90": 334,
+            "q95": 377,
+            "q99": 458,
+            "max": 573,
+            "meanFraction": 0.05842777777777778
+          },
+          "stage2Plus": {
+            "mean": 3.385,
+            "q50": 0,
+            "q90": 9,
+            "q95": 24,
+            "q99": 41,
+            "max": 81,
+            "meanFraction": 0.0009402777777777777
+          },
+          "stage3": {
+            "mean": 0.1,
+            "q50": 0,
+            "q90": 0,
+            "q95": 0,
+            "q99": 0,
+            "max": 16,
+            "meanFraction": 0.00002777777777777778
+          }
+        }
+      }
+    },
+    "dominance": {
+      "conservative": {
+        "occupancy": {
+          "baseline": 0.9666888888888889,
+          "parallel": 0.009565277777777778,
+          "antiparallel": 0.010193055555555556,
+          "stick_together": 0.009125,
+          "pearson": 0.004427777777777778
+        },
+        "sessionHitRates": {
+          "baseline": 1,
+          "parallel": 0.995,
+          "antiparallel": 0.985,
+          "stick_together": 1,
+          "pearson": 0.93
+        }
+      },
+      "moderate": {
+        "occupancy": {
+          "baseline": 0.8858819444444445,
+          "parallel": 0.03375,
+          "antiparallel": 0.03782361111111111,
+          "stick_together": 0.02524861111111111,
+          "pearson": 0.017295833333333333
+        },
+        "sessionHitRates": {
+          "baseline": 1,
+          "parallel": 1,
+          "antiparallel": 1,
+          "stick_together": 1,
+          "pearson": 1
+        }
+      },
+      "engaging": {
+        "occupancy": {
+          "baseline": 0.7178069444444445,
+          "parallel": 0.08625694444444444,
+          "antiparallel": 0.0987486111111111,
+          "stick_together": 0.054809722222222225,
+          "pearson": 0.04237777777777778
+        },
+        "sessionHitRates": {
+          "baseline": 1,
+          "parallel": 1,
+          "antiparallel": 1,
+          "stick_together": 1,
+          "pearson": 1
+        }
+      }
+    }
+  }
+}

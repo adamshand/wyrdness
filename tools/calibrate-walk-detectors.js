@@ -250,12 +250,23 @@ function quantileTable(sorted, probabilities = DEFAULT_QUANTILES) {
 	return probabilities.map((q) => [q, quantile(sorted, q)]);
 }
 
+function conservativeDuplicateThresholds(rows) {
+	const byThreshold = new Map();
+	for (const [p, threshold] of rows) {
+		const previous = byThreshold.get(threshold);
+		byThreshold.set(threshold, previous == null ? p : Math.max(previous, p));
+	}
+	return [...byThreshold.entries()]
+		.map(([threshold, p]) => [p, threshold])
+		.sort((a, b) => b[0] - a[0]);
+}
+
 function lowerTailThresholds(sortedAscending, tailProbabilities = DEFAULT_TAIL_PROBABILITIES) {
-	return tailProbabilities.map((p) => [p, quantile(sortedAscending, p)]);
+	return conservativeDuplicateThresholds(tailProbabilities.map((p) => [p, quantile(sortedAscending, p)]));
 }
 
 function upperTailThresholds(sortedAscending, tailProbabilities = DEFAULT_TAIL_PROBABILITIES) {
-	return tailProbabilities.map((p) => [p, quantile(sortedAscending, 1 - p)]);
+	return conservativeDuplicateThresholds(tailProbabilities.map((p) => [p, quantile(sortedAscending, 1 - p)]));
 }
 
 function histogramToRows(hist) {

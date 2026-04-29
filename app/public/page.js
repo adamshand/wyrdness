@@ -52,37 +52,25 @@
     };
     const SENSITIVITY_PRESETS = {
         conservative: {
-            strengthZStart: 2.4,
-            strengthZFull: 3.5,
-            stickZStart: 3.4,
-            stickZFull: 4.5,
-            pearsonRStart: 0.25,
-            pearsonRFull: 0.5,
+            debugZStart: 2.4,
+            debugZFull: 3.5,
             dominanceThreshold: 0.12,
-            walkPStart: 0.005,
-            walkPFull: 0.0001
+            channelPStart: 0.005,
+            channelPFull: 0.0001
         },
         moderate: {
-            strengthZStart: 2.0,
-            strengthZFull: 3.2,
-            stickZStart: 2.9,
-            stickZFull: 4.0,
-            pearsonRStart: 0.2,
-            pearsonRFull: 0.45,
+            debugZStart: 2.0,
+            debugZFull: 3.2,
             dominanceThreshold: 0.12,
-            walkPStart: 0.02,
-            walkPFull: 0.0003
+            channelPStart: 0.02,
+            channelPFull: 0.0003
         },
         engaging: {
-            strengthZStart: 1.7,
-            strengthZFull: 3.0,
-            stickZStart: 2.6,
-            stickZFull: 3.8,
-            pearsonRStart: 0.16,
-            pearsonRFull: 0.4,
+            debugZStart: 1.7,
+            debugZFull: 3.0,
             dominanceThreshold: 0.1,
-            walkPStart: 0.05,
-            walkPFull: 0.001
+            channelPStart: 0.05,
+            channelPFull: 0.001
         }
     };
     const SENSITIVITY_LABELS = {
@@ -91,52 +79,27 @@
         engaging: 'Engaging'
     };
 
-    // Empirical null calibration from tools/calibration/walk-distance-200bit-lookback120-1m.json.
-    // Tables map best-over-window walk-distance ratios to tail p-values after the
-    // same 200-bit, 120-tick starting-point search used at runtime.
-    const WALK_CLOSE_LOWER_TAIL = [
-        [0.00001, 0],
-        [0.00005, 0],
-        [0.0001, 0.030227550042426273],
-        [0.0002, 0.030227550042426273],
-        [0.0005, 0.04078295569076971],
-        [0.001, 0.060455100084852546],
-        [0.002, 0.08156591138153942],
-        [0.005, 0.10195738922692427],
-        [0.01, 0.12234886707230912],
-        [0.02, 0.15113775021213138],
-        [0.05, 0.19465693868532874],
-        [0.1, 0.22427781768245045],
-        [0.25, 0.2720479503818365],
-        [0.5, 0.3313490088683782]
-    ];
-    const WALK_SEPARATE_UPPER_TAIL = [
-        [0.5, 2.2838455186831035],
-        [0.25, 2.6998243364868393],
-        [0.1, 3.1306829544349917],
-        [0.05, 3.4046117169390664],
-        [0.02, 3.731640445705428],
-        [0.01, 3.9575163979061716],
-        [0.005, 4.176029573250684],
-        [0.002, 4.410507583798626],
-        [0.001, 4.546334763593183],
-        [0.0005, 4.704348730479528],
-        [0.0002, 4.84810975624406],
-        [0.0001, 4.96184223514363],
-        [0.00005, 5.067480546384635],
-        [0.00001, 5.394070523518128]
-    ];
+    const CORE = window.WyrdSignalCore;
+    const CALIBRATION = window.WyrdCalibration;
+    if (!CORE || !CALIBRATION) throw new Error('Wyrd signal core/calibration failed to load');
+
+    const WALK_CLOSE_LOWER_TAIL = CALIBRATION.walkCloseLowerTail;
+    const WALK_SEPARATE_UPPER_TAIL = CALIBRATION.walkSeparateUpperTail;
+    const CORR_HIGH_Z_UPPER_TAIL = CALIBRATION.corrHighUpperTail;
+    const CORR_LOW_Z_UPPER_TAIL = CALIBRATION.corrLowUpperTail;
+    const ANTI_AB_Z_UPPER_TAIL = CALIBRATION.antiAbUpperTail;
+    const ANTI_BA_Z_UPPER_TAIL = CALIBRATION.antiBaUpperTail;
+    const PEARSON_ABS_Z_UPPER_TAIL = CALIBRATION.pearsonAbsUpperTail;
+    const FULL_STACK_PMIN_LOWER_TAIL = CALIBRATION.fullStackPMinLowerTail;
 
     const COHERENCE_FLOOR = 0.35;
-    const P_NULL_PEARSON = 0.016;
-    const P_NULL_MIN_CHANNELS = 0.11;
     const DEMO_ANOMALY_P_SCALE = 0.001;
     const MAX_LOOKBACK = 120;
     const MIN_SEGMENT_LEN = 3;
     const EPISODE_Z_THRESHOLD = 1.6;
-    const STAGE_1_THRESHOLD = 0.12;
-    const STAGE_2_THRESHOLD = 0.38;
-    const STAGE_3_THRESHOLD = 0.68;
+    const STAGE_1_THRESHOLD = 0.18;
+    const STAGE_2_THRESHOLD = 0.52;
+    const STAGE_3_THRESHOLD = 0.72;
     const SIG_PULSE_THRESHOLD = STAGE_3_THRESHOLD;
     const SIG_PULSE_DURATION = 950;
     const SIG_PULSE_COOLDOWN = 3000;
@@ -170,7 +133,7 @@
         walkCloseDistance: 0,
         walkSeparateDistance: 0,
         pMinRaw: 1,
-        pOverall: 1,
+        pOverallDisplay: 1,
         pOverallCalibrated: 1,
         surprisal: 0,
         sigPulseStart: 0,
@@ -744,7 +707,7 @@
         state.walkCloseDistance = 0;
         state.walkSeparateDistance = 0;
         state.pMinRaw = 1;
-        state.pOverall = 1;
+        state.pOverallDisplay = 1;
         state.pOverallCalibrated = 1;
         state.surprisal = 0;
         state.sigPulseStart = 0;
@@ -774,7 +737,7 @@
         }
     }
 
-    function strengthFromZLocal(z, zStart = sensitivityPreset().strengthZStart, zFull = sensitivityPreset().strengthZFull) {
+    function strengthFromZLocal(z, zStart = sensitivityPreset().debugZStart, zFull = sensitivityPreset().debugZFull) {
         return strengthFromZ(z, zStart, zFull);
     }
 
@@ -841,34 +804,39 @@
         }
 
         const currentIdx = state.cumSumA.length - 1;
-        const spA = findOptimalStartingPoint(state.cumSumA, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
-        const spB = findOptimalStartingPoint(state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
-        const spCorr = findOptimalStartingPointCorrelated(state.cumSumA, state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
+        const spA = CORE.findOptimalStartingPoint(state.cumSumA, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
+        const spB = CORE.findOptimalStartingPoint(state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
+        const spCorr = CORE.findOptimalStartingPointCorrelated(state.cumSumA, state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
         const corrHighZ = spCorr.highZ;
         const corrLowZ = spCorr.lowZ;
         const corrStart = Math.min(spCorr.highStart, spCorr.lowStart);
-        const spAnti = findOptimalStartingPointAnti(state.cumSumA, state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
+        const spAnti = CORE.findOptimalStartingPointAnti(state.cumSumA, state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
         const antiAbZ = spAnti.abZ;
         const antiBaZ = spAnti.baZ;
         const antiStart = Math.min(spAnti.abStart, spAnti.baStart);
-        const spAgree = findOptimalStartingPointAgreement(state.cumSumAgree, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
+        const spAgree = CORE.findOptimalStartingPointAgreement(state.cumSumAgree, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
         const stickZ = spAgree.z;
-        const spPearson = findOptimalStartingPointPearson(state.cumSumXY, state.cumSumA, state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
+        const spPearson = CORE.findOptimalStartingPointPearson(state.cumSumXY, state.cumSumA, state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
         const pearsonZSeg = spPearson.z;
         const pearsonRSeg = spPearson.r;
-        const spWalk = walkDistanceScores(state.cumSumA, state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN);
+        const spWalk = CORE.walkDistanceScores(state.cumSumA, state.cumSumB, currentIdx, N, MAX_LOOKBACK, MIN_SEGMENT_LEN, CALIBRATION);
         const walkCloseZ = spWalk.closeZ;
         const walkSeparateZ = spWalk.separateZ;
         const walkCloseP = spWalk.closeP;
         const walkSeparateP = spWalk.separateP;
         const sens = sensitivityPreset();
+        const pCorrHigh = CORE.empiricalTailP(corrHighZ, CORR_HIGH_Z_UPPER_TAIL, 'upper');
+        const pCorrLow = CORE.empiricalTailP(corrLowZ, CORR_LOW_Z_UPPER_TAIL, 'upper');
+        const pAntiAb = CORE.empiricalTailP(antiAbZ, ANTI_AB_Z_UPPER_TAIL, 'upper');
+        const pAntiBa = CORE.empiricalTailP(antiBaZ, ANTI_BA_Z_UPPER_TAIL, 'upper');
+        const pPearson = CORE.empiricalTailP(Math.abs(pearsonZSeg), PEARSON_ABS_Z_UPPER_TAIL, 'upper');
 
-        const corrHighRaw = strengthFromZLocal(corrHighZ);
-        const corrLowRaw = strengthFromZLocal(corrLowZ);
-        const antiAbRaw = strengthFromZLocal(antiAbZ);
-        const antiBaRaw = strengthFromZLocal(antiBaZ);
-        const stickRaw = strengthFromP(walkCloseP, sens.walkPStart, sens.walkPFull);
-        const walkSeparateRaw = strengthFromP(walkSeparateP, sens.walkPStart, sens.walkPFull);
+        const corrHighRaw = strengthFromP(pCorrHigh, sens.channelPStart, sens.channelPFull);
+        const corrLowRaw = strengthFromP(pCorrLow, sens.channelPStart, sens.channelPFull);
+        const antiAbRaw = strengthFromP(pAntiAb, sens.channelPStart, sens.channelPFull);
+        const antiBaRaw = strengthFromP(pAntiBa, sens.channelPStart, sens.channelPFull);
+        const stickRaw = strengthFromP(walkCloseP, sens.channelPStart, sens.channelPFull);
+        const walkSeparateRaw = strengthFromP(walkSeparateP, sens.channelPStart, sens.channelPFull);
 
         const updateEpisode = (channel, currentZ, segmentStart) => {
             const ep = state.episodes[channel];
@@ -887,7 +855,7 @@
                 ep.currentZ = absZ;
             }
             const effectiveZ = ep.peakZ > EPISODE_Z_THRESHOLD ? Math.max(absZ, ep.peakZ * 0.7) : absZ;
-            ep.strength = strengthFromZLocal(effectiveZ, sens.strengthZStart, sens.strengthZFull);
+            ep.strength = strengthFromZLocal(effectiveZ, sens.debugZStart, sens.debugZFull);
         };
 
         updateEpisode('correlated_high', corrHighZ, corrStart);
@@ -914,7 +882,7 @@
         if (spWalk.separateStart < currentIdx) state.walkSeparateDistance = smoothValue(state.walkSeparateDistance, spWalk.separateDistance, statK);
         state.pearsonR = smoothValue(state.pearsonR, pearsonRSeg, statK);
 
-        const pearsonRaw = clamp01((Math.abs(pearsonRSeg) - sens.pearsonRStart) / (sens.pearsonRFull - sens.pearsonRStart));
+        const pearsonRaw = strengthFromP(pPearson, sens.channelPStart, sens.channelPFull);
         const raw = {
             correlated_high: boostedDemoValue('parallel', corrHighRaw),
             correlated_low: corrLowRaw,
@@ -936,21 +904,16 @@
         }
 
         const dtMs = tickIntervalMs();
-        const pCorrHigh = pFromSegmentZ(corrHighZ);
-        const pCorrLow = pFromSegmentZ(corrLowZ);
-        const pAntiAb = pFromSegmentZ(antiAbZ);
-        const pAntiBa = pFromSegmentZ(antiBaZ);
         const pStick = walkCloseP;
         const pWalkSeparate = walkSeparateP;
-        const pPearson = Math.min(1, pFromSegmentZ(pearsonZSeg) / P_NULL_PEARSON);
         const pMinRaw = Math.min(pCorrHigh, pCorrLow, pAntiAb, pAntiBa, pStick, pWalkSeparate, pPearson);
-        const pOverallCalibrated = Math.min(1, pMinRaw / P_NULL_MIN_CHANNELS);
-        const pOverallReal = Math.min(COHERENCE_FLOOR, pOverallCalibrated);
-        const pOverall = state.demoBoost > 0.05 ? Math.min(pOverallReal, DEMO_ANOMALY_P_SCALE * (1 - state.demoBoost)) : pOverallReal;
-        const surprisal = Math.min(6, -Math.log10(pOverall));
+        const pOverallCalibrated = CORE.empiricalTailP(pMinRaw, FULL_STACK_PMIN_LOWER_TAIL, 'lower');
+        const pOverallDisplay = Math.min(COHERENCE_FLOOR, pOverallCalibrated);
+        const pOverallDisplayWithDemo = state.demoBoost > 0.05 ? Math.min(pOverallDisplay, DEMO_ANOMALY_P_SCALE * (1 - state.demoBoost)) : pOverallDisplay;
+        const surprisal = Math.min(6, -Math.log10(pOverallDisplayWithDemo));
         state.pMinRaw = pMinRaw;
         state.pOverallCalibrated = pOverallCalibrated;
-        state.pOverall = pOverall;
+        state.pOverallDisplay = pOverallDisplayWithDemo;
         state.surprisal = surprisal;
         const targetSig = clamp01((surprisal - 0.3) / 5.0);
         const mode = preset();
@@ -1374,7 +1337,7 @@
             p: {
                 minRaw: Number(state.pMinRaw.toPrecision(4)),
                 overallCalibrated: Number(state.pOverallCalibrated.toPrecision(4)),
-                overall: Number(state.pOverall.toPrecision(4)),
+                display: Number(state.pOverallDisplay.toPrecision(4)),
                 surprisal: Number(state.surprisal.toFixed(3))
             }
         };
@@ -1489,7 +1452,7 @@
             raw_pearson: Number(state.rawRender.pearson.toFixed(5)),
             p_min_raw: Number(state.pMinRaw.toPrecision(5)),
             p_overall_calibrated: Number(state.pOverallCalibrated.toPrecision(5)),
-            p_overall: Number(state.pOverall.toPrecision(5)),
+            p_overall_display: Number(state.pOverallDisplay.toPrecision(5)),
             surprisal: Number(state.surprisal.toFixed(5)),
             z_a: Number(state.zA.toFixed(5)),
             z_b: Number(state.zB.toFixed(5)),

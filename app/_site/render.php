@@ -151,6 +151,8 @@ function render_page(string $routeDir, array $site, array $page, string $content
     $pageDescription = page_description($site, $page);
     $bodyClass = join_classes('site-page', (string) ($page['body_class'] ?? ''));
     $pageCssUrl = route_asset_url($site, $routeDir, 'page.css');
+    $signalCoreJsUrl = route_asset_url($site, $routeDir, 'signal-core.js');
+    $calibrationJsUrl = route_asset_url($site, $routeDir, 'calibration.js');
     $pageJsUrl = route_asset_url($site, $routeDir, 'page.js');
 
     require __DIR__ . '/layout.php';
