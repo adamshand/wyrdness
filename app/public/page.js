@@ -1345,7 +1345,7 @@
             toggleHelp();
             return;
         }
-        if (e.shiftKey && (e.key === 'l' || e.key === 'L')) {
+        if (e.key === 'h' || e.key === 'H') {
             openHistory();
             return;
         }
