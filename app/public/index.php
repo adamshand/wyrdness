@@ -126,7 +126,7 @@ ob_start();
         <h3>Why does this matter?</h3>
         <p>
             Some researchers explore whether group intention or focused attention can influence random
-            systems. This is a tool for that exploration: watch for the orb to respond to your group's shared focus.
+            systems. This is a tool for that exploration: watch for changes in the orb while your group shares focus.
         </p>
 
         <div class="help-footer">
