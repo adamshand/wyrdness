@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import '../app/public/signal-core.js';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -8,6 +9,8 @@ import { performance } from 'node:perf_hooks';
 const DEFAULT_CALIBRATION = 'tools/calibration/walk-distance-200bit-lookback120-1m.json';
 const DEFAULT_STACK_CALIBRATION = 'tools/calibration/signal-stack-200bit-lookback120-1m.json';
 const P_NULL_MIN_CHANNELS = 0.11;
+const MIN_SUPPORTED_TAIL = 0.0001;
+const core = globalThis.WyrdSignalCore;
 const P_CHECK_THRESHOLDS = [0.5, 0.25, 0.1, 0.05, 0.02, 0.01, 0.005, 0.001];
 const CHANNELS = ['baseline', 'parallel', 'antiparallel', 'stick_together', 'pearson'];
 const SENSITIVITY_PRESETS = {
@@ -175,28 +178,6 @@ function clamp01(v) {
 	return Math.min(1, Math.max(0, v));
 }
 
-function erfApprox(x) {
-	const sign = x < 0 ? -1 : 1;
-	const ax = Math.abs(x);
-	const t = 1 / (1 + 0.3275911 * ax);
-	const a1 = 0.254829592;
-	const a2 = -0.284496736;
-	const a3 = 1.421413741;
-	const a4 = -1.453152027;
-	const a5 = 1.061405429;
-	const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
-	return sign * y;
-}
-
-function normalCdf(x) {
-	return 0.5 * (1 + erfApprox(x / Math.SQRT2));
-}
-
-function twoSidedPFromZ(z) {
-	const tail = 1 - normalCdf(Math.abs(z));
-	return Math.max(1e-18, Math.min(1, 2 * tail));
-}
-
 function strengthFromZ(z, zStart, zFull) {
 	return clamp01((Math.abs(z) - zStart) / (zFull - zStart));
 }
@@ -209,157 +190,16 @@ function strengthFromP(p, pStart, pFull) {
 	return clamp01((value - start) / (full - start));
 }
 
-function findOptimalStartingPointCorrelated(
-	cumSumA,
-	cumSumB,
-	currentIdx,
-	bitsPerTick,
-	lookback,
-	minLen
-) {
-	let highZ = 0;
-	let lowZ = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const zA = ((cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0)) / Math.sqrt(bitSpan);
-		const zB = ((cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0)) / Math.sqrt(bitSpan);
-		if (zA > 0 && zB > 0) highZ = Math.max(highZ, Math.min(zA, zB));
-		if (zA < 0 && zB < 0) lowZ = Math.max(lowZ, Math.min(-zA, -zB));
-	}
-	return { highZ, lowZ };
-}
-
-function findOptimalStartingPointAnti(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let abZ = 0;
-	let baZ = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const zA = ((cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0)) / Math.sqrt(bitSpan);
-		const zB = ((cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0)) / Math.sqrt(bitSpan);
-		if (zA > 0 && zB < 0) abZ = Math.max(abZ, Math.min(zA, -zB));
-		if (zA < 0 && zB > 0) baZ = Math.max(baZ, Math.min(-zA, zB));
-	}
-	return { abZ, baZ };
-}
-
-function findOptimalStartingPointPearson(
-	cumSumXY,
-	cumSumA,
-	cumSumB,
-	currentIdx,
-	bitsPerTick,
-	lookback,
-	minLen
-) {
-	let bestZ = 0;
-	let bestR = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const sumXY = (cumSumXY[currentIdx] ?? 0) - (cumSumXY[s] ?? 0);
-		const sumX = (cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0);
-		const sumY = (cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0);
-		const meanX = sumX / bitSpan;
-		const meanY = sumY / bitSpan;
-		const cov = sumXY / bitSpan - meanX * meanY;
-		const varX = Math.max(1e-6, 1 - meanX * meanX);
-		const varY = Math.max(1e-6, 1 - meanY * meanY);
-		const r = Math.max(-1, Math.min(1, cov / Math.sqrt(varX * varY)));
-		const rClamped = Math.max(-0.999, Math.min(0.999, r));
-		const fisherZ = 0.5 * Math.log((1 + rClamped) / (1 - rClamped));
-		const z = fisherZ * Math.sqrt(Math.max(1, bitSpan - 3));
-		if (Math.abs(z) > Math.abs(bestZ)) {
-			bestZ = z;
-			bestR = r;
-		}
-	}
-	return { z: bestZ, r: bestR };
-}
-
-function walkDistanceScores(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let closeRatio = Number.POSITIVE_INFINITY;
-	let separateRatio = Number.NEGATIVE_INFINITY;
-	let closeLegacyZ = 0;
-	let separateLegacyZ = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	const expectedAbsNormalScale = Math.sqrt(2 / Math.PI);
-
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const tickSpan = currentIdx - s;
-		let sumDistance = 0;
-		let expectedSumDistance = 0;
-		const a0 = cumSumA[s] ?? 0;
-		const b0 = cumSumB[s] ?? 0;
-		for (let i = s + 1; i <= currentIdx; i++) {
-			const age = i - s;
-			const walkA = (cumSumA[i] ?? 0) - a0;
-			const walkB = (cumSumB[i] ?? 0) - b0;
-			sumDistance += Math.abs(walkA - walkB);
-			expectedSumDistance += Math.sqrt(2 * bitsPerTick * age) * expectedAbsNormalScale;
-		}
-		const ratio = sumDistance / tickSpan / Math.max(1e-12, expectedSumDistance / tickSpan);
-		const ratioSigma = Math.max(0.09, 0.34 / Math.pow(tickSpan, 0.25));
-		if (ratio < closeRatio) {
-			closeRatio = ratio;
-			closeLegacyZ = (1 - ratio) / ratioSigma;
-		}
-		if (ratio > separateRatio) {
-			separateRatio = ratio;
-			separateLegacyZ = (ratio - 1) / ratioSigma;
-		}
-	}
-	return { closeRatio, separateRatio, closeLegacyZ, separateLegacyZ };
-}
-
-function prepareTailTable(rows, mode) {
+function prepareTailTable(rows) {
 	const byThreshold = new Map();
 	for (const [p, threshold] of rows) {
-		if (!Number.isFinite(p) || !Number.isFinite(threshold) || p <= 0) continue;
+		if (!Number.isFinite(p) || !Number.isFinite(threshold) || p < MIN_SUPPORTED_TAIL) continue;
 		const previous = byThreshold.get(threshold);
 		byThreshold.set(threshold, previous == null ? p : Math.max(previous, p));
 	}
-	const mapped = [...byThreshold.entries()]
-		.map(([threshold, p]) => ({ p, threshold }))
-		.sort((a, b) => a.threshold - b.threshold);
-	if (mode === 'upper') return mapped;
-	return mapped;
-}
-
-function interpolateLogP(p1, x1, p2, x2, x) {
-	if (x1 === x2) return Math.min(p1, p2);
-	const t = Math.max(0, Math.min(1, (x - x1) / (x2 - x1)));
-	const logP = Math.log(p1) + (Math.log(p2) - Math.log(p1)) * t;
-	return Math.exp(logP);
-}
-
-function empiricalTailP(value, table, mode) {
-	if (!Number.isFinite(value) || table.length === 0) return 1;
-	if (mode === 'lower') {
-		if (value <= table[0].threshold) return table[0].p;
-		if (value >= table[table.length - 1].threshold) return 1;
-		for (let i = 0; i < table.length - 1; i++) {
-			const a = table[i];
-			const b = table[i + 1];
-			if (value >= a.threshold && value <= b.threshold) {
-				return interpolateLogP(a.p, a.threshold, b.p, b.threshold, value);
-			}
-		}
-		return 1;
-	}
-
-	// Upper tail: thresholds ascend while p descends. Low/non-extreme values are p~1.
-	if (value <= table[0].threshold) return 1;
-	if (value >= table[table.length - 1].threshold) return table[table.length - 1].p;
-	for (let i = 0; i < table.length - 1; i++) {
-		const a = table[i];
-		const b = table[i + 1];
-		if (value >= a.threshold && value <= b.threshold) {
-			return interpolateLogP(a.p, a.threshold, b.p, b.threshold, value);
-		}
-	}
-	return 1;
+	return [...byThreshold.entries()]
+		.map(([threshold, p]) => [p, threshold])
+		.sort((a, b) => a[1] - b[1]);
 }
 
 function zeroCounts() {
@@ -467,6 +307,16 @@ function main() {
 	const antiBaTable = prepareTailTable(stackCalibration.signal.antiBaZ.upperTailThresholds, 'upper');
 	const pearsonTable = prepareTailTable(stackCalibration.signal.pearsonAbsZ.upperTailThresholds, 'upper');
 	const pMinTable = prepareTailTable(stackCalibration.signal.pMinRaw.lowerTailThresholds, 'lower');
+	const runtimeCalibration = {
+		walkCloseLowerTail: closeTable,
+		walkSeparateUpperTail: separateTable,
+		corrHighUpperTail: corrHighTable,
+		corrLowUpperTail: corrLowTable,
+		antiAbUpperTail: antiAbTable,
+		antiBaUpperTail: antiBaTable,
+		pearsonAbsUpperTail: pearsonTable,
+		fullStackPMinLowerTail: pMinTable
+	};
 	const recordedSamples = options.ticks - warmup;
 	const stateBySensitivity = Object.fromEntries(
 		Object.keys(SENSITIVITY_PRESETS).map((sensitivity) => [
@@ -502,46 +352,27 @@ function main() {
 		if (tick <= warmup) continue;
 
 		const currentIdx = cumSumA.length - 1;
-		const corr = findOptimalStartingPointCorrelated(
+		const signal = core.computeRuntimeSignal(
 			cumSumA,
 			cumSumB,
-			currentIdx,
-			sampleBits,
-			maxLookback,
-			minSegmentLen
-		);
-		const anti = findOptimalStartingPointAnti(
-			cumSumA,
-			cumSumB,
-			currentIdx,
-			sampleBits,
-			maxLookback,
-			minSegmentLen
-		);
-		const pearson = findOptimalStartingPointPearson(
 			cumSumXY,
-			cumSumA,
-			cumSumB,
 			currentIdx,
 			sampleBits,
 			maxLookback,
-			minSegmentLen
+			minSegmentLen,
+			runtimeCalibration
 		);
-		const walk = walkDistanceScores(
-			cumSumA,
-			cumSumB,
-			currentIdx,
-			sampleBits,
-			maxLookback,
-			minSegmentLen
-		);
-		const pClose = empiricalTailP(walk.closeRatio, closeTable, 'lower');
-		const pSeparate = empiricalTailP(walk.separateRatio, separateTable, 'upper');
-		const pCorrHigh = empiricalTailP(corr.highZ, corrHighTable, 'upper');
-		const pCorrLow = empiricalTailP(corr.lowZ, corrLowTable, 'upper');
-		const pAntiAb = empiricalTailP(anti.abZ, antiAbTable, 'upper');
-		const pAntiBa = empiricalTailP(anti.baZ, antiBaTable, 'upper');
-		const pPearson = empiricalTailP(Math.abs(pearson.z), pearsonTable, 'upper');
+		const corr = signal.corr;
+		const anti = signal.anti;
+		const pearson = signal.pearson;
+		const walk = signal.walk;
+		const pClose = signal.p.stick;
+		const pSeparate = signal.p.walkSeparate;
+		const pCorrHigh = signal.p.corrHigh;
+		const pCorrLow = signal.p.corrLow;
+		const pAntiAb = signal.p.antiAb;
+		const pAntiBa = signal.p.antiBa;
+		const pPearson = signal.p.pearson;
 
 		for (const [sensitivity, preset] of Object.entries(SENSITIVITY_PRESETS)) {
 			const currentVisual = {
@@ -579,18 +410,10 @@ function main() {
 			bucket.currentCounts[chooseDominant(currentVisual, preset.dominanceThreshold)]++;
 			bucket.calibratedCounts[chooseDominant(calibratedVisual, preset.dominanceThreshold)]++;
 
-			const pMinRuntime = Math.min(
-				pCorrHigh,
-				pCorrLow,
-				pAntiAb,
-				pAntiBa,
-				pClose,
-				pSeparate,
-				pPearson
-			);
+			const pMinRuntime = signal.pMinRaw;
 			bucket.pMin[recorded] = pMinRuntime;
 			bucket.oldScalarPOverall[recorded] = Math.min(1, pMinRuntime / P_NULL_MIN_CHANNELS);
-			bucket.pOverall[recorded] = empiricalTailP(pMinRuntime, pMinTable, 'lower');
+			bucket.pOverall[recorded] = signal.pOverallCalibrated;
 		}
 		recorded++;
 	}

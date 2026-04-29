@@ -549,11 +549,11 @@ Sources:
 Implementation guidance:
 
 - The visual should be driven by a _slow envelope_ (integrator) rather than raw per-second values.
-- WyrdWeb should avoid dangerous strobe behavior. Use the existing anomaly animation (white core / expanding white ring) as the safe Stage 3 substitute.
-- Suggested WyrdWeb stage mapping:
-  - Stage 1: selected official channel colour brightens.
-  - Stage 2: channel colour whitens/blooms.
-  - Stage 3: expanding white anomaly ring / safe pulse, optionally with subtle rainbow shimmer.
+- WyrdWeb should avoid dangerous strobe behavior. Use soft bloom and expanding white rings as safe high-intensity effects.
+- Current WyrdWeb implementation separates the two concepts:
+  - Smoothed stages/brightness: selected official channel colour brightens, then whitens/blooms as significance persists.
+  - Raw anomaly pulse: a single expanding white ring can trigger from an extreme calibrated p-value before the smoothed brightness envelope reaches a high stage.
+- This separation keeps the lamp calm and non-jittery while still making short rare events visible.
 - Different channels may later modulate motion/texture, but for now keep user-facing visuals simple and place directional details in debug.
 
 ## Multiple Wyrd Lights Behavior (Confirmed)
@@ -641,10 +641,11 @@ Wyrd's mention of:
   - apply segmentation to detect start points and peak heights
   - output per-channel probability-like values (p-values)
 - Output mapping:
-  - brightness driven primarily by p-values (with smoothing)
+  - brightness driven primarily by calibrated p-values (with smoothing)
   - colour driven by the dominant Wyrd-aligned visual channel (red parallel, amber antiparallel, blue stick, green Pearson) with dwell/hysteresis
   - baseline as dim, slow colour wandering
-  - high significance as staged whitening and safe pulse/ring effects
+  - sustained significance as staged whitening/bloom
+  - short rare calibrated anomalies as safe pulse/ring effects, with cooldown
   - channel-specific motion/texture parameters can be added later, but keep the first refactor simple
 
 Source basis:

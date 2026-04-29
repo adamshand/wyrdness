@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 const DEFAULT_WALK = 'tools/calibration/walk-distance-200bit-lookback120-1m.json';
 const DEFAULT_STACK = 'tools/calibration/signal-stack-200bit-lookback120-1m.json';
 const DEFAULT_OUT = 'app/public/calibration.js';
+const MIN_SUPPORTED_TAIL = 0.0001;
 
 function usage() {
 	return (
@@ -49,12 +50,16 @@ function parseArgs(argv) {
 	return options;
 }
 
+function supportedTailRows(rows) {
+	return rows.filter(([p, threshold]) => p >= MIN_SUPPORTED_TAIL && Number.isFinite(p) && Number.isFinite(threshold));
+}
+
 function lowerAscending(rows) {
-	return [...rows].sort((a, b) => a[1] - b[1]);
+	return supportedTailRows(rows).sort((a, b) => a[1] - b[1]);
 }
 
 function upperAscending(rows) {
-	return [...rows].sort((a, b) => a[1] - b[1]);
+	return supportedTailRows(rows).sort((a, b) => a[1] - b[1]);
 }
 
 function main() {
@@ -73,8 +78,8 @@ function main() {
 			maxLookback: stack.params.maxLookback,
 			minSegmentLen: stack.params.minSegmentLen,
 			recordedSamples: stack.params.recordedSamples,
-			minSupportedTail: 0.0001,
-			note: 'Far-tail values below minSupportedTail are capped by calibration support and should not be described as precise probabilities.'
+			minSupportedTail: MIN_SUPPORTED_TAIL,
+			note: 'Runtime lookup tables are capped at minSupportedTail; more extreme observations display as <= this supported tail, not as precise rarer probabilities.'
 		},
 		walkCloseLowerTail: lowerAscending(walk.walkDistance.closeRatio.lowerTailThresholds),
 		walkSeparateUpperTail: upperAscending(walk.walkDistance.separateRatio.upperTailThresholds),

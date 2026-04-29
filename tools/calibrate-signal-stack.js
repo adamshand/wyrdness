@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 
+import '../app/public/signal-core.js';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 const DEFAULT_WALK_CALIBRATION = 'tools/calibration/walk-distance-200bit-lookback120-1m.json';
-const P_NULL_PEARSON = 0.016;
 const P_NULL_MIN_CHANNELS = 0.11;
+const MIN_SUPPORTED_TAIL = 0.0001;
+const core = globalThis.WyrdSignalCore;
 const DEFAULT_QUANTILES = [
 	0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05,
 	0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.98, 0.99, 0.995, 0.998, 0.999, 0.9995,
@@ -15,7 +17,7 @@ const DEFAULT_QUANTILES = [
 ];
 const DEFAULT_TAIL_PROBABILITIES = [
 	0.5, 0.25, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002,
-	0.0001, 0.00005, 0.00001
+	0.0001
 ];
 const P_CHECK_THRESHOLDS = [0.5, 0.25, 0.1, 0.05, 0.02, 0.01, 0.005, 0.001];
 
@@ -151,146 +153,20 @@ function sampleTick(byteStream, sampleBits) {
 	return { sumX, sumY, sumXY };
 }
 
-function erfApprox(x) {
-	const sign = x < 0 ? -1 : 1;
-	const ax = Math.abs(x);
-	const t = 1 / (1 + 0.3275911 * ax);
-	const a1 = 0.254829592;
-	const a2 = -0.284496736;
-	const a3 = 1.421413741;
-	const a4 = -1.453152027;
-	const a5 = 1.061405429;
-	const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
-	return sign * y;
-}
-
-function normalCdf(x) {
-	return 0.5 * (1 + erfApprox(x / Math.SQRT2));
-}
-
-function twoSidedPFromZ(z) {
-	if (z === 0) return 1;
-	const tail = 1 - normalCdf(Math.abs(z));
-	return Math.max(1e-18, Math.min(1, 2 * tail));
-}
-
-function findOptimalStartingPointCorrelated(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let highZ = 0;
-	let lowZ = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const zA = ((cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0)) / Math.sqrt(bitSpan);
-		const zB = ((cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0)) / Math.sqrt(bitSpan);
-		if (zA > 0 && zB > 0) highZ = Math.max(highZ, Math.min(zA, zB));
-		if (zA < 0 && zB < 0) lowZ = Math.max(lowZ, Math.min(-zA, -zB));
-	}
-	return { highZ, lowZ };
-}
-
-function findOptimalStartingPointAnti(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let abZ = 0;
-	let baZ = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const zA = ((cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0)) / Math.sqrt(bitSpan);
-		const zB = ((cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0)) / Math.sqrt(bitSpan);
-		if (zA > 0 && zB < 0) abZ = Math.max(abZ, Math.min(zA, -zB));
-		if (zA < 0 && zB > 0) baZ = Math.max(baZ, Math.min(-zA, zB));
-	}
-	return { abZ, baZ };
-}
-
-function findOptimalStartingPointPearson(cumSumXY, cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let bestZ = 0;
-	let bestR = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const sumXY = (cumSumXY[currentIdx] ?? 0) - (cumSumXY[s] ?? 0);
-		const sumX = (cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0);
-		const sumY = (cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0);
-		const meanX = sumX / bitSpan;
-		const meanY = sumY / bitSpan;
-		const cov = sumXY / bitSpan - meanX * meanY;
-		const varX = Math.max(1e-6, 1 - meanX * meanX);
-		const varY = Math.max(1e-6, 1 - meanY * meanY);
-		const r = Math.max(-1, Math.min(1, cov / Math.sqrt(varX * varY)));
-		const rClamped = Math.max(-0.999, Math.min(0.999, r));
-		const fisherZ = 0.5 * Math.log((1 + rClamped) / (1 - rClamped));
-		const z = fisherZ * Math.sqrt(Math.max(1, bitSpan - 3));
-		if (Math.abs(z) > Math.abs(bestZ)) {
-			bestZ = z;
-			bestR = r;
-		}
-	}
-	return { z: bestZ, r: bestR };
-}
-
-function walkDistanceScores(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let closeRatio = Number.POSITIVE_INFINITY;
-	let separateRatio = Number.NEGATIVE_INFINITY;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	const expectedAbsNormalScale = Math.sqrt(2 / Math.PI);
-
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const tickSpan = currentIdx - s;
-		let sumDistance = 0;
-		let expectedSumDistance = 0;
-		const a0 = cumSumA[s] ?? 0;
-		const b0 = cumSumB[s] ?? 0;
-		for (let i = s + 1; i <= currentIdx; i++) {
-			const age = i - s;
-			const walkA = (cumSumA[i] ?? 0) - a0;
-			const walkB = (cumSumB[i] ?? 0) - b0;
-			sumDistance += Math.abs(walkA - walkB);
-			expectedSumDistance += Math.sqrt(2 * bitsPerTick * age) * expectedAbsNormalScale;
-		}
-		const ratio = sumDistance / tickSpan / Math.max(1e-12, expectedSumDistance / tickSpan);
-		if (ratio < closeRatio) closeRatio = ratio;
-		if (ratio > separateRatio) separateRatio = ratio;
-	}
-	return { closeRatio, separateRatio };
-}
-
-function conservativeTailTable(rows, mode) {
+function conservativeTailTable(rows) {
 	const byThreshold = new Map();
 	for (const [p, threshold] of rows) {
-		if (!Number.isFinite(p) || !Number.isFinite(threshold) || p <= 0) continue;
+		if (!Number.isFinite(p) || !Number.isFinite(threshold) || p < MIN_SUPPORTED_TAIL) continue;
 		const previous = byThreshold.get(threshold);
 		byThreshold.set(threshold, previous == null ? p : Math.max(previous, p));
 	}
-	const mapped = [...byThreshold.entries()]
-		.map(([threshold, p]) => ({ p, threshold }))
-		.sort((a, b) => a.threshold - b.threshold);
-	if (mode === 'upper') return mapped;
-	return mapped;
-}
-
-function interpolateLogP(p1, x1, p2, x2, x) {
-	if (x1 === x2) return Math.max(p1, p2);
-	const t = Math.max(0, Math.min(1, (x - x1) / (x2 - x1)));
-	return Math.exp(Math.log(p1) + (Math.log(p2) - Math.log(p1)) * t);
+	return [...byThreshold.entries()]
+		.map(([threshold, p]) => [p, threshold])
+		.sort((a, b) => a[1] - b[1]);
 }
 
 function empiricalTailP(value, table, mode) {
-	if (!Number.isFinite(value) || table.length === 0) return 1;
-	if (mode === 'lower') {
-		if (value <= table[0].threshold) return table[0].p;
-		if (value >= table[table.length - 1].threshold) return 1;
-	} else {
-		if (value <= table[0].threshold) return 1;
-		if (value >= table[table.length - 1].threshold) return table[table.length - 1].p;
-	}
-	for (let i = 0; i < table.length - 1; i++) {
-		const a = table[i];
-		const b = table[i + 1];
-		if (value >= a.threshold && value <= b.threshold) {
-			return interpolateLogP(a.p, a.threshold, b.p, b.threshold, value);
-		}
-	}
-	return 1;
+	return core.empiricalTailP(value, table, mode);
 }
 
 function quantile(sorted, q) {
@@ -421,7 +297,7 @@ function main() {
 		if (tick <= warmup) continue;
 
 		const currentIdx = cumSumA.length - 1;
-		const corr = findOptimalStartingPointCorrelated(
+		const corr = core.findOptimalStartingPointCorrelated(
 			cumSumA,
 			cumSumB,
 			currentIdx,
@@ -429,7 +305,7 @@ function main() {
 			maxLookback,
 			minSegmentLen
 		);
-		const anti = findOptimalStartingPointAnti(
+		const anti = core.findOptimalStartingPointAnti(
 			cumSumA,
 			cumSumB,
 			currentIdx,
@@ -437,7 +313,7 @@ function main() {
 			maxLookback,
 			minSegmentLen
 		);
-		const pearson = findOptimalStartingPointPearson(
+		const pearson = core.findOptimalStartingPointPearson(
 			cumSumXY,
 			cumSumA,
 			cumSumB,
@@ -446,16 +322,17 @@ function main() {
 			maxLookback,
 			minSegmentLen
 		);
-		const walk = walkDistanceScores(
+		const walk = core.walkDistanceScores(
 			cumSumA,
 			cumSumB,
 			currentIdx,
 			sampleBits,
 			maxLookback,
-			minSegmentLen
+			minSegmentLen,
+			{ walkCloseLowerTail: closeTable, walkSeparateUpperTail: separateTable }
 		);
-		const pClose = empiricalTailP(walk.closeRatio, closeTable, 'lower');
-		const pSeparate = empiricalTailP(walk.separateRatio, separateTable, 'upper');
+		const pClose = walk.closeP;
+		const pSeparate = walk.separateP;
 
 		corrHighZ[recorded] = corr.highZ;
 		corrLowZ[recorded] = corr.lowZ;
@@ -512,6 +389,7 @@ function main() {
 			sampleBits,
 			maxLookback,
 			minSegmentLen,
+			minSupportedTail: MIN_SUPPORTED_TAIL,
 			randomSource: 'node:crypto.randomBytes',
 			walkCalibration: options.walkCalibration,
 			search: 'runtime best-starting-point detectors, runtime pMinRaw min across corr/anti/walk/Pearson channels',

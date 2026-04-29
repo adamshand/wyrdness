@@ -1,5 +1,7 @@
 # WyrdWeb Next Refactor Brief: Wyrd-Aligned Colour/Channel Update
 
+> Historical note: this refactor is now largely implemented in `app/public/page.js`, `app/public/signal-core.js`, and `app/public/calibration.js`. Keep this file as a record of the refactor plan; use `AGENTS.md` and `docs/TODO.md` for current implementation notes.
+
 Audience: PHP/Kawhi builder agent working on the buildless PHP + vanilla JS port of WyrdWeb.
 
 Read this first. Treat `WYRDLIGHT.md` as the deep reference/encyclopedia, not as the task list.
@@ -50,7 +52,7 @@ For this first refactor, implement the pragmatic grouping over the existing lega
 
 ```js
 visual.parallel = max(raw.correlated_high, raw.correlated_low);
-visual.antiparallel = max(raw.anti_ab, raw.anti_ba);
+visual.antiparallel = max(raw.anti_ab, raw.anti_ba, raw.walk_separate);
 visual.stick_together = raw.stick;
 visual.pearson = raw.pearson;
 ```
@@ -103,7 +105,7 @@ Exact hue values can be tuned visually, but keep the colour families clear.
 ```js
 const visualRaw = {
   parallel: Math.max(raw.correlated_high, raw.correlated_low),
-  antiparallel: Math.max(raw.anti_ab, raw.anti_ba),
+  antiparallel: Math.max(raw.anti_ab, raw.anti_ba, raw.walk_separate ?? 0),
   stick_together: raw.stick,
   pearson: raw.pearson
 };
@@ -220,11 +222,11 @@ Suggested behaviour:
 - Below Stage 1: dim baseline or low channel colour.
 - Stage 1: channel colour brightens.
 - Stage 2: increase whitening/bloom around orb.
-- Stage 3: trigger safe anomaly ring/pulse; in Wow mode make it stronger, in Mellow mode make it softer.
+- Stage 3 / high intensity: keep any high-energy treatment smooth and non-strobing.
 
-Pulse rules:
+Current pulse rules:
 
-- Trigger on upward crossing into Stage 3 or high significance threshold.
+- Trigger the real anomaly ring from raw calibrated significance (`pOverallCalibrated <= 0.0005`) rather than from the smoothed visual stage threshold.
 - Use cooldown to avoid rapid repeated flashing.
 - Pulse should be expansion/fade, not hard blink.
 
@@ -351,7 +353,7 @@ Run through these before considering the refactor complete:
 - [ ] Mellow is calm and suitable as background.
 - [ ] Wow is more engaging but not dangerously flashy.
 - [ ] Stage 2 visibly whitens/blooms.
-- [ ] Stage 3 uses safe expanding ring/pulse, not strobe.
+- [ ] High-intensity/anomaly behaviour uses safe expanding ring/pulse, not strobe.
 - [ ] Sensitivity labels remain Conservative/Moderate/Engaging.
 - [ ] Debug panel shows raw directional channels and visual grouped channels.
 - [ ] Keyboard shortcuts still work.

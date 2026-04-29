@@ -1,5 +1,7 @@
 # WyrdWeb Kawhi Porting Brief
 
+> Historical note: the Kawhi/PHP port is complete. Active runtime files now live under `app/public/`; the original SvelteKit code is under `v1/` for reference.
+
 Goal: port WyrdWeb from SvelteKit to a buildless Kawhi/PHP tenant site.
 
 Do not preserve Svelte. Use PHP only for initial HTML shell. Use vanilla JS modules for all signal/rendering logic.
@@ -26,11 +28,12 @@ Primary behavior to update during port:
   - green = Pearson
 - keep directional sub-channel details in debug only
 - baseline should become dim slow color wandering
-- Stage 3 should use safe anomaly pulse/ring, not strobe
+- high-intensity/anomaly behavior should use safe pulse/ring, not strobe
 - response speed remains future work
 
-Implementation target:
-- index.php renders shell
-- assets/wyrd.css contains styles
-- assets/wyrd.js handles DOM, animation, controls
-- assets/signal/*.js contains pure signal/math code
+Actual implementation:
+- `app/public/index.php` renders the shell
+- `app/public/page.css` contains route-local styles
+- `app/public/page.js` handles DOM, animation, controls, and rendering orchestration
+- `app/public/signal-core.js` contains shared signal/math code
+- `app/public/calibration.js` contains generated runtime calibration tables

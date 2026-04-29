@@ -24,7 +24,7 @@ Patterns of non-random behaviour are represented as a moving, shimmering orb of 
 - 🔵 Stick together: the two streams follow unusually similar paths
 - 🟢 Pearson: Pearson correlation becomes the dominant pattern
 
-Brightness tracks overall statistical significance (brighter = more unusual). When significance crosses a threshold, you'll see an expanding white ring pulse. 
+Brightness tracks calibrated statistical unusualness (brighter = more unusual). Rare calibrated anomalies can trigger a single expanding white ring pulse; the pulse is intentionally separated from the smoothed brightness envelope so the orb can stay calm without hiding short rare events.
 
 There are two main settings you can use to adjust the visual experience:
 
@@ -42,7 +42,7 @@ Go Wyrd suggests that the different colours may match to different group experie
 ## Caveats
 
 - This is pure AI vibe slop. I used Claude/Codex to reverse engineer the behaviour of the Wyrd Light from the limited information available on their website (see [WYRDLIGHT.md](docs/WYRDLIGHT.md)).
-- The math involved is beyond my expertise, so I can't validate the implementation.
+- The detector stack is empirically calibrated against simulated random data, but this is still an experimental reverse-engineered visualisation rather than a validated scientific instrument.
 - Currently, the web app uses `crypto.getRandomValues()` to generate the streams of random numbers; this is not a quantum source and does not reproduce Wyrd's stored, previously unobserved quantum random data model.
 - I'm still experimenting with visualisation and UI. Once that seems to be working well, I'll look at wiring up a quantum source.
 

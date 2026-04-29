@@ -10,8 +10,9 @@ const DEFAULT_QUANTILES = [
 	0.9, 0.95, 0.98, 0.99, 0.995, 0.998, 0.999, 0.9995, 0.9999, 0.99995, 0.99999
 ];
 
+const MIN_SUPPORTED_TAIL = 0.0001;
 const DEFAULT_TAIL_PROBABILITIES = [
-	0.5, 0.25, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, 0.00001
+	0.5, 0.25, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, MIN_SUPPORTED_TAIL
 ];
 
 function usage() {
@@ -391,6 +392,7 @@ function main() {
 			sampleBits: options.sampleBits,
 			maxLookback: options.maxLookback,
 			minSegmentLen: options.minSegmentLen,
+			minSupportedTail: MIN_SUPPORTED_TAIL,
 			randomSource: 'node:crypto.randomBytes',
 			distanceStatistic:
 				'mean(abs((cumA_i-cumA_start) - (cumB_i-cumB_start))) / expectedMeanDistance',

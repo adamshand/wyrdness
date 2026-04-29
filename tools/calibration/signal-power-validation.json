@@ -1,7 +1,7 @@
 {
   "version": 1,
   "kind": "wyrdweb-signal-power-validation",
-  "createdAt": "2026-04-29T00:21:08.924Z",
+  "createdAt": "2026-04-29T03:05:58.749Z",
   "params": {
     "ticks": 5000,
     "sampleBits": 200,
@@ -81,16 +81,16 @@
       "expect": "stick_together",
       "counts": {
         "baseline": 0,
-        "parallel": 367,
+        "parallel": 526,
         "antiparallel": 0,
-        "stick_together": 4513,
+        "stick_together": 4354,
         "pearson": 0
       },
       "percent": {
         "baseline": 0,
-        "parallel": 0.07520491803278688,
+        "parallel": 0.10778688524590165,
         "antiparallel": 0,
-        "stick_together": 0.9247950819672132,
+        "stick_together": 0.8922131147540984,
         "pearson": 0
       }
     },
@@ -98,17 +98,17 @@
       "expect": "pearson",
       "counts": {
         "baseline": 0,
-        "parallel": 6,
+        "parallel": 30,
         "antiparallel": 0,
-        "stick_together": 7,
-        "pearson": 4867
+        "stick_together": 4,
+        "pearson": 4846
       },
       "percent": {
         "baseline": 0,
-        "parallel": 0.0012295081967213116,
+        "parallel": 0.006147540983606557,
         "antiparallel": 0,
-        "stick_together": 0.0014344262295081967,
-        "pearson": 0.9973360655737705
+        "stick_together": 0.000819672131147541,
+        "pearson": 0.9930327868852459
       }
     },
     "pearson_negative": {
@@ -116,16 +116,16 @@
       "counts": {
         "baseline": 0,
         "parallel": 0,
-        "antiparallel": 2,
-        "stick_together": 1,
-        "pearson": 4877
+        "antiparallel": 17,
+        "stick_together": 0,
+        "pearson": 4863
       },
       "percent": {
         "baseline": 0,
         "parallel": 0,
-        "antiparallel": 0.0004098360655737705,
-        "stick_together": 0.00020491803278688525,
-        "pearson": 0.9993852459016394
+        "antiparallel": 0.0034836065573770492,
+        "stick_together": 0,
+        "pearson": 0.996516393442623
       }
     }
   }

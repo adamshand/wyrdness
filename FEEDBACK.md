@@ -1,3 +1,5 @@
+> Status note: this feedback is historical. The current implementation now uses shared detector code in `app/public/signal-core.js`, generated empirical runtime tables in `app/public/calibration.js`, full-stack p-min calibration, p-driven Pearson/corr/anti channel strengths, session-event validation, and a raw calibrated anomaly pulse trigger. Keep this file as the original review context, not as the current state of the app.
+
 Yes — you’ve done **one important calibration correctly**, but it is not yet a full calibration of the statistical display.
 
 My read is:

@@ -93,8 +93,8 @@ ob_start();
         <h3>What does brightness mean?</h3>
         <p>
             The brighter the orb glows, the more coherent or statistically unusual the current pattern.
-            At stronger stages the colour blooms toward white; at the highest safe stage an expanding
-            white ring may appear. The app deliberately avoids rapid white strobing.
+            At stronger stages the colour blooms toward white. A rare calibrated anomaly can also trigger
+            a single expanding white ring. The app deliberately avoids rapid white strobing.
         </p>
 
         <h3>What about the swirling effect?</h3>
@@ -110,7 +110,7 @@ ob_start();
             <li><strong>S</strong> Sensitivity — Conservative / Moderate / Engaging</li>
             <li><strong>D</strong> Demo — start or stop demo mode</li>
             <li><strong>L</strong> Legend — toggle color legend</li>
-            <li><strong>H</strong> History — open a timestamped CSV history in a new tab</li>
+            <li><strong>Shift+L</strong> History — open a timestamped CSV history in a new tab</li>
             <li><strong>`</strong> Debug — show additional signal data</li>
             <li><strong>Esc</strong> Close panels or stop demo</li>
         </ul>
@@ -147,7 +147,7 @@ ob_start();
             <span class="shortcut"><b>S</b> sensitivity</span>
             <span class="shortcut"><b>D</b> demo</span>
             <span class="shortcut"><b>L</b> legend</span>
-            <span class="shortcut"><b>H</b> history</span>
+            <span class="shortcut"><b>⇧L</b> history</span>
             <span class="shortcut"><b>`</b> debug</span>
         </div>
         <div class="bar-center">

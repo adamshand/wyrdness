@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import '../app/public/signal-core.js';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -43,8 +44,11 @@ const COHERENCE_FLOOR = 0.35;
 const STAGE_1_THRESHOLD = 0.18;
 const STAGE_2_THRESHOLD = 0.52;
 const STAGE_3_THRESHOLD = 0.72;
+const ANOMALY_PULSE_P_THRESHOLD = 0.0005;
 const SIG_PULSE_COOLDOWN_MS = 3000;
 const DEFAULT_UPDATES_PER_SEC = 1;
+const MIN_SUPPORTED_TAIL = 0.0001;
+const core = globalThis.WyrdSignalCore;
 
 function usage() {
 	return (
@@ -60,12 +64,13 @@ function usage() {
 		`  --sample-bits <n>       Bits per stream per tick. Default: from calibration\n` +
 		`  --max-lookback <n>      Starting-point search depth. Default: from calibration\n` +
 		`  --min-segment-len <n>   Minimum segment length. Default: from calibration\n` +
-		`  --prewarm <n>           Detector-only warmup ticks per session. Default: max-lookback\n` +
+		`  --prewarm <n>           Detector-only warmup ticks per session. Default: 0, matching browser startup\n` +
 		`  --updates-per-sec <n>   Signal ticks per second. Default: ${DEFAULT_UPDATES_PER_SEC}\n` +
 		`  --boot-seconds <n>      Browser boot/ignition seconds with no signal ticks. Default: 5\n` +
 		`  --stage-1 <n>           Stage 1 sig threshold. Default: ${STAGE_1_THRESHOLD}\n` +
 		`  --stage-2 <n>           Stage 2 sig threshold. Default: ${STAGE_2_THRESHOLD}\n` +
-		`  --stage-3 <n>           Stage 3/pulse sig threshold. Default: ${STAGE_3_THRESHOLD}\n` +
+		`  --stage-3 <n>           Stage 3 sig threshold. Default: ${STAGE_3_THRESHOLD}\n` +
+		`  --anomaly-p <n>         Raw calibrated p threshold for pulse rings. Default: ${ANOMALY_PULSE_P_THRESHOLD}\n` +
 		`  --chunk-bytes <n>       Random byte buffer refill size. Default: 1048576\n` +
 		`  --out <path>            Optional JSON report path\n` +
 		`  --pretty                Pretty-print JSON output\n` +
@@ -85,12 +90,13 @@ function parseArgs(argv) {
 		sampleBits: null,
 		maxLookback: null,
 		minSegmentLen: null,
-		prewarm: null,
+		prewarm: 0,
 		updatesPerSec: DEFAULT_UPDATES_PER_SEC,
 		bootSeconds: 5,
 		stage1: STAGE_1_THRESHOLD,
 		stage2: STAGE_2_THRESHOLD,
 		stage3: STAGE_3_THRESHOLD,
+		anomalyP: ANOMALY_PULSE_P_THRESHOLD,
 		chunkBytes: 1_048_576,
 		out: null,
 		pretty: false
@@ -143,6 +149,9 @@ function parseArgs(argv) {
 			case '--stage-3':
 				options.stage3 = Number(next());
 				break;
+			case '--anomaly-p':
+				options.anomalyP = Number(next());
+				break;
 			case '--chunk-bytes':
 				options.chunkBytes = Number(next());
 				break;
@@ -177,6 +186,9 @@ function parseArgs(argv) {
 	}
 	if (!(options.stage1 <= options.stage2 && options.stage2 <= options.stage3)) {
 		throw new Error('--stage-1 must be <= --stage-2, and --stage-2 must be <= --stage-3');
+	}
+	if (!Number.isFinite(options.anomalyP) || options.anomalyP <= 0 || options.anomalyP > 1) {
+		throw new Error('--anomaly-p must be in (0, 1]');
 	}
 	if (!Number.isFinite(options.chunkBytes) || options.chunkBytes < 1)
 		throw new Error('--chunk-bytes must be positive');
@@ -248,120 +260,16 @@ function stageFromSig(sig, thresholds) {
 	return 0;
 }
 
-function findOptimalStartingPointCorrelated(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let highZ = 0;
-	let lowZ = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const zA = ((cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0)) / Math.sqrt(bitSpan);
-		const zB = ((cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0)) / Math.sqrt(bitSpan);
-		if (zA > 0 && zB > 0) highZ = Math.max(highZ, Math.min(zA, zB));
-		if (zA < 0 && zB < 0) lowZ = Math.max(lowZ, Math.min(-zA, -zB));
-	}
-	return { highZ, lowZ };
-}
-
-function findOptimalStartingPointAnti(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let abZ = 0;
-	let baZ = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const zA = ((cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0)) / Math.sqrt(bitSpan);
-		const zB = ((cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0)) / Math.sqrt(bitSpan);
-		if (zA > 0 && zB < 0) abZ = Math.max(abZ, Math.min(zA, -zB));
-		if (zA < 0 && zB > 0) baZ = Math.max(baZ, Math.min(-zA, zB));
-	}
-	return { abZ, baZ };
-}
-
-function findOptimalStartingPointPearson(cumSumXY, cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let bestZ = 0;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const bitSpan = (currentIdx - s) * bitsPerTick;
-		const sumXY = (cumSumXY[currentIdx] ?? 0) - (cumSumXY[s] ?? 0);
-		const sumX = (cumSumA[currentIdx] ?? 0) - (cumSumA[s] ?? 0);
-		const sumY = (cumSumB[currentIdx] ?? 0) - (cumSumB[s] ?? 0);
-		const meanX = sumX / bitSpan;
-		const meanY = sumY / bitSpan;
-		const cov = sumXY / bitSpan - meanX * meanY;
-		const varX = Math.max(1e-6, 1 - meanX * meanX);
-		const varY = Math.max(1e-6, 1 - meanY * meanY);
-		const r = Math.max(-1, Math.min(1, cov / Math.sqrt(varX * varY)));
-		const rClamped = Math.max(-0.999, Math.min(0.999, r));
-		const fisherZ = 0.5 * Math.log((1 + rClamped) / (1 - rClamped));
-		const z = fisherZ * Math.sqrt(Math.max(1, bitSpan - 3));
-		if (Math.abs(z) > Math.abs(bestZ)) bestZ = z;
-	}
-	return { z: bestZ };
-}
-
-function walkDistanceScores(cumSumA, cumSumB, currentIdx, bitsPerTick, lookback, minLen) {
-	let closeRatio = Number.POSITIVE_INFINITY;
-	let separateRatio = Number.NEGATIVE_INFINITY;
-	let foundCandidate = false;
-	const searchStart = Math.max(0, currentIdx - lookback);
-	const expectedAbsNormalScale = Math.sqrt(2 / Math.PI);
-
-	for (let s = searchStart; s < currentIdx - minLen + 1; s++) {
-		const tickSpan = currentIdx - s;
-		if (tickSpan < minLen) continue;
-		foundCandidate = true;
-		let sumDistance = 0;
-		let expectedSumDistance = 0;
-		const a0 = cumSumA[s] ?? 0;
-		const b0 = cumSumB[s] ?? 0;
-		for (let i = s + 1; i <= currentIdx; i++) {
-			const age = i - s;
-			const walkA = (cumSumA[i] ?? 0) - a0;
-			const walkB = (cumSumB[i] ?? 0) - b0;
-			sumDistance += Math.abs(walkA - walkB);
-			expectedSumDistance += Math.sqrt(2 * bitsPerTick * age) * expectedAbsNormalScale;
-		}
-		const ratio = sumDistance / tickSpan / Math.max(1e-12, expectedSumDistance / tickSpan);
-		if (ratio < closeRatio) closeRatio = ratio;
-		if (ratio > separateRatio) separateRatio = ratio;
-	}
-	return foundCandidate ? { closeRatio, separateRatio } : { closeRatio: 1, separateRatio: 1 };
-}
-
 function prepareTailTable(rows) {
 	const byThreshold = new Map();
 	for (const [p, threshold] of rows) {
-		if (!Number.isFinite(p) || !Number.isFinite(threshold) || p <= 0) continue;
+		if (!Number.isFinite(p) || !Number.isFinite(threshold) || p < MIN_SUPPORTED_TAIL) continue;
 		const previous = byThreshold.get(threshold);
 		byThreshold.set(threshold, previous == null ? p : Math.max(previous, p));
 	}
 	return [...byThreshold.entries()]
-		.map(([threshold, p]) => ({ p, threshold }))
-		.sort((a, b) => a.threshold - b.threshold);
-}
-
-function interpolateLogP(p1, x1, p2, x2, x) {
-	if (x1 === x2) return Math.max(p1, p2);
-	const t = Math.max(0, Math.min(1, (x - x1) / (x2 - x1)));
-	return Math.exp(Math.log(p1) + (Math.log(p2) - Math.log(p1)) * t);
-}
-
-function empiricalTailP(value, table, mode) {
-	if (!Number.isFinite(value) || table.length === 0) return 1;
-	if (mode === 'lower') {
-		if (value <= table[0].threshold) return table[0].p;
-		if (value >= table[table.length - 1].threshold) return 1;
-	} else {
-		if (value <= table[0].threshold) return 1;
-		if (value >= table[table.length - 1].threshold) return table[table.length - 1].p;
-	}
-	for (let i = 0; i < table.length - 1; i++) {
-		const a = table[i];
-		const b = table[i + 1];
-		if (value >= a.threshold && value <= b.threshold) {
-			return interpolateLogP(a.p, a.threshold, b.p, b.threshold, value);
-		}
-	}
-	return 1;
+		.map(([threshold, p]) => [p, threshold])
+		.sort((a, b) => a[1] - b[1]);
 }
 
 function zeroCounts() {
@@ -452,7 +360,7 @@ function main() {
 	const sampleBits = Math.floor(options.sampleBits ?? walkCalibration.params.sampleBits);
 	const maxLookback = Math.floor(options.maxLookback ?? walkCalibration.params.maxLookback);
 	const minSegmentLen = Math.floor(options.minSegmentLen ?? walkCalibration.params.minSegmentLen);
-	const prewarmTicks = Math.floor(options.prewarm ?? maxLookback);
+	const prewarmTicks = Math.floor(options.prewarm ?? 0);
 	const sessionTicks = Math.floor(options.minutes * 60 * options.updatesPerSec);
 	const bootTicks = Math.min(sessionTicks, Math.floor(options.bootSeconds * options.updatesPerSec));
 	const dtMs = 1000 / options.updatesPerSec;
@@ -476,6 +384,16 @@ function main() {
 		antiBa: prepareTailTable(stackCalibration.signal.antiBaZ.upperTailThresholds),
 		pearson: prepareTailTable(stackCalibration.signal.pearsonAbsZ.upperTailThresholds),
 		pMin: prepareTailTable(stackCalibration.signal.pMinRaw.lowerTailThresholds)
+	};
+	const runtimeCalibration = {
+		walkCloseLowerTail: tables.close,
+		walkSeparateUpperTail: tables.separate,
+		corrHighUpperTail: tables.corrHigh,
+		corrLowUpperTail: tables.corrLow,
+		antiAbUpperTail: tables.antiAb,
+		antiBaUpperTail: tables.antiBa,
+		pearsonAbsUpperTail: tables.pearson,
+		fullStackPMinLowerTail: tables.pMin
 	};
 
 	const modeState = Object.fromEntries(
@@ -531,9 +449,9 @@ function main() {
 					preset,
 					sigEnergy: 0,
 					sigEnergyRender: 0,
-					sigWasAbove: false,
 					pulseLastMs: -Infinity,
 					pulses: 0,
+					rawPulseActive: false,
 					maxStage: 0,
 					maxSig: 0,
 					stage1PlusSeconds: 0,
@@ -565,20 +483,25 @@ function main() {
 
 			appendSample();
 			const currentIdx = cumSumA.length - 1;
-			const corr = findOptimalStartingPointCorrelated(cumSumA, cumSumB, currentIdx, sampleBits, maxLookback, minSegmentLen);
-			const anti = findOptimalStartingPointAnti(cumSumA, cumSumB, currentIdx, sampleBits, maxLookback, minSegmentLen);
-			const pearson = findOptimalStartingPointPearson(cumSumXY, cumSumA, cumSumB, currentIdx, sampleBits, maxLookback, minSegmentLen);
-			const walk = walkDistanceScores(cumSumA, cumSumB, currentIdx, sampleBits, maxLookback, minSegmentLen);
-
-			const pCorrHigh = empiricalTailP(corr.highZ, tables.corrHigh, 'upper');
-			const pCorrLow = empiricalTailP(corr.lowZ, tables.corrLow, 'upper');
-			const pAntiAb = empiricalTailP(anti.abZ, tables.antiAb, 'upper');
-			const pAntiBa = empiricalTailP(anti.baZ, tables.antiBa, 'upper');
-			const pClose = empiricalTailP(walk.closeRatio, tables.close, 'lower');
-			const pSeparate = empiricalTailP(walk.separateRatio, tables.separate, 'upper');
-			const pPearson = empiricalTailP(Math.abs(pearson.z), tables.pearson, 'upper');
-			const pMinRaw = Math.min(pCorrHigh, pCorrLow, pAntiAb, pAntiBa, pClose, pSeparate, pPearson);
-			const pOverallCalibrated = empiricalTailP(pMinRaw, tables.pMin, 'lower');
+			const signal = core.computeRuntimeSignal(
+				cumSumA,
+				cumSumB,
+				cumSumXY,
+				currentIdx,
+				sampleBits,
+				maxLookback,
+				minSegmentLen,
+				runtimeCalibration
+			);
+			const pCorrHigh = signal.p.corrHigh;
+			const pCorrLow = signal.p.corrLow;
+			const pAntiAb = signal.p.antiAb;
+			const pAntiBa = signal.p.antiBa;
+			const pClose = signal.p.stick;
+			const pSeparate = signal.p.walkSeparate;
+			const pPearson = signal.p.pearson;
+			const pOverallCalibrated = signal.pOverallCalibrated;
+			const rawPulseActive = pOverallCalibrated <= options.anomalyP;
 			const pOverallDisplay = Math.min(COHERENCE_FLOOR, pOverallCalibrated);
 			const surprisal = Math.min(6, -Math.log10(pOverallDisplay));
 			const targetSig = clamp01((surprisal - 0.3) / 5.0);
@@ -595,13 +518,12 @@ function main() {
 				if (stage >= 2) mode.stage2PlusSeconds += dtMs / 1000;
 				if (stage >= 3) mode.stage3Seconds += dtMs / 1000;
 
-				const isAbove = mode.sigEnergyRender >= stageThresholds.stage3;
 				const cooledDown = nowMs - mode.pulseLastMs >= SIG_PULSE_COOLDOWN_MS;
-				if (isAbove && !mode.sigWasAbove && cooledDown) {
+				if (rawPulseActive && !mode.rawPulseActive && cooledDown) {
 					mode.pulses++;
 					mode.pulseLastMs = nowMs;
 				}
-				mode.sigWasAbove = isAbove;
+				mode.rawPulseActive = rawPulseActive;
 			}
 
 			for (const [sensitivity, state] of Object.entries(sensitivities)) {
@@ -697,8 +619,9 @@ function main() {
 			walkCalibration: options.walkCalibration,
 			stackCalibration: options.stackCalibration,
 			stageThresholds,
+			anomalyPulsePThreshold: options.anomalyP,
 			randomSource: 'node:crypto.randomBytes',
-			note: 'Detector is prewarmed per session; visual smoothing and pulse logic start from zero at session start.'
+			note: 'Default startup matches the browser: no detector prewarm, no signal ticks during boot, visual smoothing starts from zero, and pulse rings are triggered from raw calibrated p.'
 		},
 		runtime: {
 			durationMs: ended - started,
