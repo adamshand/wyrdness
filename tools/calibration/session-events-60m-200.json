@@ -1,7 +1,7 @@
 {
   "version": 1,
   "kind": "wyrdweb-session-event-null-validation",
-  "createdAt": "2026-04-29T03:44:19.159Z",
+  "createdAt": "2026-04-29T03:58:33.177Z",
   "params": {
     "sessions": 200,
     "minutes": 60,
@@ -25,8 +25,8 @@
     "note": "Default startup matches the browser: no detector prewarm, no signal ticks during boot, visual smoothing starts from zero, and pulse rings are triggered from raw calibrated p."
   },
   "runtime": {
-    "durationMs": 17363.000209,
-    "ticksPerSecond": 41467.487838121
+    "durationMs": 18959.127542000002,
+    "ticksPerSecond": 37976.43105701936
   },
   "results": {
     "modes": {
@@ -37,8 +37,8 @@
             "fraction": 1
           },
           "stage2": {
-            "sessions": 74,
-            "fraction": 0.37
+            "sessions": 76,
+            "fraction": 0.38
           },
           "stage3": {
             "sessions": 0,
@@ -46,40 +46,40 @@
           }
         },
         "pulsesPerSession": {
-          "mean": 0.81,
+          "mean": 0.72,
           "q50": 0,
           "q90": 2,
           "q95": 3,
-          "q99": 5,
-          "max": 8
+          "q99": 4,
+          "max": 5
         },
-        "pulsesPerHourMean": 0.81,
+        "pulsesPerHourMean": 0.72,
         "maxSigEnergyRender": {
-          "mean": 0.4884574475897539,
-          "q50": 0.47592004697628637,
-          "q90": 0.5983168325039943,
-          "q95": 0.6001242971154243,
-          "q99": 0.6002059991210523,
-          "max": 0.6002059991327963
+          "mean": 0.4899413747816733,
+          "q50": 0.474519064930248,
+          "q90": 0.5989296415942291,
+          "q95": 0.5999990434265716,
+          "q99": 0.600205998918524,
+          "max": 0.6002059991327902
         },
         "stageSeconds": {
           "stage1Plus": {
-            "mean": 236.425,
-            "q50": 228,
-            "q90": 338,
-            "q95": 366,
-            "q99": 405,
-            "max": 421,
-            "meanFraction": 0.06567361111111111
+            "mean": 237.3,
+            "q50": 225,
+            "q90": 348,
+            "q95": 379,
+            "q99": 436,
+            "max": 454,
+            "meanFraction": 0.06591666666666667
           },
           "stage2Plus": {
-            "mean": 3.93,
+            "mean": 3.16,
             "q50": 0,
-            "q90": 11,
-            "q95": 22,
-            "q99": 37,
-            "max": 80,
-            "meanFraction": 0.0010916666666666668
+            "q90": 9,
+            "q95": 18,
+            "q99": 32,
+            "max": 35,
+            "meanFraction": 0.0008777777777777778
           },
           "stage3": {
             "mean": 0,
@@ -99,8 +99,8 @@
             "fraction": 1
           },
           "stage2": {
-            "sessions": 52,
-            "fraction": 0.26
+            "sessions": 51,
+            "fraction": 0.255
           },
           "stage3": {
             "sessions": 0,
@@ -108,40 +108,40 @@
           }
         },
         "pulsesPerSession": {
-          "mean": 0.81,
+          "mean": 0.72,
           "q50": 0,
           "q90": 2,
           "q95": 3,
-          "q99": 5,
-          "max": 8
+          "q99": 4,
+          "max": 5
         },
-        "pulsesPerHourMean": 0.81,
+        "pulsesPerHourMean": 0.72,
         "maxSigEnergyRender": {
-          "mean": 0.454542546519308,
-          "q50": 0.4397814752300538,
-          "q90": 0.5863150524530996,
-          "q95": 0.5972438143452578,
-          "q99": 0.6002047620618953,
-          "max": 0.6002059991327812
+          "mean": 0.4529962272933631,
+          "q50": 0.44580176551399703,
+          "q90": 0.5883779598399664,
+          "q95": 0.5967661859159425,
+          "q99": 0.6002012956098068,
+          "max": 0.6002059558386014
         },
         "stageSeconds": {
           "stage1Plus": {
-            "mean": 216.42,
-            "q50": 207,
-            "q90": 326,
-            "q95": 347,
-            "q99": 379,
-            "max": 420,
-            "meanFraction": 0.060116666666666665
+            "mean": 217.01,
+            "q50": 206,
+            "q90": 331,
+            "q95": 358,
+            "q99": 422,
+            "max": 442,
+            "meanFraction": 0.06028055555555555
           },
           "stage2Plus": {
-            "mean": 3.235,
+            "mean": 2.615,
             "q50": 0,
-            "q90": 10,
-            "q95": 20,
-            "q99": 35,
-            "max": 78,
-            "meanFraction": 0.0008986111111111111
+            "q90": 9,
+            "q95": 18,
+            "q99": 32,
+            "max": 35,
+            "meanFraction": 0.0007263888888888889
           },
           "stage3": {
             "mean": 0,
@@ -156,52 +156,104 @@
       }
     },
     "dominance": {
-      "conservative": {
-        "occupancy": {
-          "baseline": 0.9648069444444445,
-          "parallel": 0.010715277777777778,
-          "antiparallel": 0.01132638888888889,
-          "stick_together": 0.009247222222222223,
-          "pearson": 0.0039041666666666665
+      "wow": {
+        "conservative": {
+          "occupancy": {
+            "baseline": 0.9646958333333333,
+            "parallel": 0.010358333333333334,
+            "antiparallel": 0.011740277777777778,
+            "stick_together": 0.009506944444444445,
+            "pearson": 0.0036986111111111113
+          },
+          "sessionHitRates": {
+            "baseline": 1,
+            "parallel": 1,
+            "antiparallel": 1,
+            "stick_together": 1,
+            "pearson": 0.9
+          }
         },
-        "sessionHitRates": {
-          "baseline": 1,
-          "parallel": 0.98,
-          "antiparallel": 1,
-          "stick_together": 1,
-          "pearson": 0.87
+        "moderate": {
+          "occupancy": {
+            "baseline": 0.8835180555555555,
+            "parallel": 0.03589722222222222,
+            "antiparallel": 0.04146805555555556,
+            "stick_together": 0.024997222222222223,
+            "pearson": 0.014119444444444445
+          },
+          "sessionHitRates": {
+            "baseline": 1,
+            "parallel": 1,
+            "antiparallel": 1,
+            "stick_together": 1,
+            "pearson": 1
+          }
+        },
+        "engaging": {
+          "occupancy": {
+            "baseline": 0.7142430555555556,
+            "parallel": 0.09016666666666667,
+            "antiparallel": 0.1045375,
+            "stick_together": 0.053068055555555556,
+            "pearson": 0.037984722222222225
+          },
+          "sessionHitRates": {
+            "baseline": 1,
+            "parallel": 1,
+            "antiparallel": 1,
+            "stick_together": 1,
+            "pearson": 1
+          }
         }
       },
-      "moderate": {
-        "occupancy": {
-          "baseline": 0.8835888888888889,
-          "parallel": 0.03589166666666667,
-          "antiparallel": 0.040502777777777776,
-          "stick_together": 0.025019444444444445,
-          "pearson": 0.014997222222222223
+      "mellow": {
+        "conservative": {
+          "occupancy": {
+            "baseline": 0.9646958333333333,
+            "parallel": 0.010355555555555555,
+            "antiparallel": 0.011727777777777778,
+            "stick_together": 0.0095,
+            "pearson": 0.0037208333333333334
+          },
+          "sessionHitRates": {
+            "baseline": 1,
+            "parallel": 1,
+            "antiparallel": 1,
+            "stick_together": 1,
+            "pearson": 0.9
+          }
         },
-        "sessionHitRates": {
-          "baseline": 1,
-          "parallel": 1,
-          "antiparallel": 1,
-          "stick_together": 1,
-          "pearson": 1
-        }
-      },
-      "engaging": {
-        "occupancy": {
-          "baseline": 0.71555,
-          "parallel": 0.08939166666666666,
-          "antiparallel": 0.10244583333333333,
-          "stick_together": 0.05375138888888889,
-          "pearson": 0.03886111111111111
+        "moderate": {
+          "occupancy": {
+            "baseline": 0.8835180555555555,
+            "parallel": 0.03582777777777778,
+            "antiparallel": 0.04144166666666667,
+            "stick_together": 0.0251125,
+            "pearson": 0.0141
+          },
+          "sessionHitRates": {
+            "baseline": 1,
+            "parallel": 1,
+            "antiparallel": 1,
+            "stick_together": 1,
+            "pearson": 1
+          }
         },
-        "sessionHitRates": {
-          "baseline": 1,
-          "parallel": 1,
-          "antiparallel": 1,
-          "stick_together": 1,
-          "pearson": 1
+        "engaging": {
+          "occupancy": {
+            "baseline": 0.7142430555555556,
+            "parallel": 0.08990416666666666,
+            "antiparallel": 0.10404722222222222,
+            "stick_together": 0.054125,
+            "pearson": 0.03768055555555556
+          },
+          "sessionHitRates": {
+            "baseline": 1,
+            "parallel": 1,
+            "antiparallel": 1,
+            "stick_together": 1,
+            "pearson": 1
+          }
         }
       }
     }

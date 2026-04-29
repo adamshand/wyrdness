@@ -92,7 +92,7 @@ Runtime flow:
 - Brightness/significance uses `pOverallCalibrated`, then applies a separate display floor (`COHERENCE_FLOOR`) only for ambience.
 - Do not label display-floored p as a true statistical p-value.
 
-Current runtime tables are capped at `minSupportedTail = 0.0001` where applicable. More extreme observations should be described as below the supported table range, not as precise rarer probabilities.
+Current runtime channel tables are capped at `minSupportedChannelTail = 0.0001` where applicable. The full-stack overall calibrated p table is currently capped at `minSupportedOverallTail = 0.0005`. More extreme observations should be described as below the supported table range, not as precise rarer probabilities.
 
 ## Sensitivity
 

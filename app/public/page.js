@@ -371,10 +371,16 @@
         state.zAgree = 0;
         state.coherence = 0;
         state.sigEnergy = 0;
+        state.sigEnergyRender = 0;
+        state.rawLast = zeroRaw();
+        state.rawRender = zeroRaw();
+        state.visualLast = zeroVisual();
+        state.visualRender = zeroVisual();
         state.tickBudget = 0;
         state.dominant = 'baseline';
         state.dominance = 0;
         state.hueSmooth = 205;
+        state.satSmooth = 58;
         state.demoBoost = 0;
         state.demoMode = false;
         state.demoIndex = 0;

@@ -3,7 +3,7 @@
     'use strict';
     root.WyrdCalibration = {
     "version": 1,
-    "generatedAt": "2026-04-29T03:06:32.623Z",
+    "generatedAt": "2026-04-29T03:57:55.326Z",
     "sources": {
         "walk": "tools/calibration/walk-distance-200bit-lookback120-1m.json",
         "stack": "tools/calibration/signal-stack-200bit-lookback120-1m.json"
@@ -13,8 +13,10 @@
         "maxLookback": 120,
         "minSegmentLen": 3,
         "recordedSamples": 999880,
-        "minSupportedTail": 0.0001,
-        "note": "Runtime lookup tables are capped at minSupportedTail; more extreme observations display as <= this supported tail, not as precise rarer probabilities."
+        "minSupportedTail": 0.0005,
+        "minSupportedChannelTail": 0.0001,
+        "minSupportedOverallTail": 0.0005,
+        "note": "Channel lookup tables are capped at minSupportedChannelTail. The full-stack overall p lookup is capped at minSupportedOverallTail; more extreme observations display as <= the supported tail, not as precise rarer probabilities."
     },
     "walkCloseLowerTail": [
         [

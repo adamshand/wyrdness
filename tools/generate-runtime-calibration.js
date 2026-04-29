@@ -54,6 +54,11 @@ function supportedTailRows(rows) {
 	return rows.filter(([p, threshold]) => p >= MIN_SUPPORTED_TAIL && Number.isFinite(p) && Number.isFinite(threshold));
 }
 
+function minTailProbability(rows) {
+	const supported = supportedTailRows(rows);
+	return supported.reduce((min, [p]) => Math.min(min, p), 1);
+}
+
 function lowerAscending(rows) {
 	return supportedTailRows(rows).sort((a, b) => a[1] - b[1]);
 }
@@ -66,6 +71,7 @@ function main() {
 	const options = parseArgs(process.argv);
 	const walk = JSON.parse(readFileSync(resolve(options.walk), 'utf8'));
 	const stack = JSON.parse(readFileSync(resolve(options.stack), 'utf8'));
+	const minSupportedOverallTail = minTailProbability(stack.signal.pMinRaw.lowerTailThresholds);
 	const calibration = {
 		version: 1,
 		generatedAt: new Date().toISOString(),
@@ -78,8 +84,11 @@ function main() {
 			maxLookback: stack.params.maxLookback,
 			minSegmentLen: stack.params.minSegmentLen,
 			recordedSamples: stack.params.recordedSamples,
-			minSupportedTail: MIN_SUPPORTED_TAIL,
-			note: 'Runtime lookup tables are capped at minSupportedTail; more extreme observations display as <= this supported tail, not as precise rarer probabilities.'
+			minSupportedTail: minSupportedOverallTail,
+			minSupportedChannelTail: MIN_SUPPORTED_TAIL,
+			minSupportedOverallTail,
+			note:
+				'Channel lookup tables are capped at minSupportedChannelTail. The full-stack overall p lookup is capped at minSupportedOverallTail; more extreme observations display as <= the supported tail, not as precise rarer probabilities.'
 		},
 		walkCloseLowerTail: lowerAscending(walk.walkDistance.closeRatio.lowerTailThresholds),
 		walkSeparateUpperTail: upperAscending(walk.walkDistance.separateRatio.upperTailThresholds),

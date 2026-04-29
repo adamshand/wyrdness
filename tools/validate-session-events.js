@@ -55,7 +55,7 @@ function usage() {
 		`Usage: node tools/validate-session-events.js [options]\n\n` +
 		`Simulates null sessions with the calibrated runtime detector stack and\n` +
 		`reports session-level visual event rates: stage occupancy, stage hits,\n` +
-		`pulse/ring frequency, and dominant-colour occupancy.\n\n` +
+		`pulse/ring frequency, and mode/sensitivity dominant-colour occupancy.\n\n` +
 		`Options:\n` +
 		`  --sessions <n>          Number of independent sessions. Default: 1000\n` +
 		`  --minutes <n>           Session length in minutes. Default: 10\n` +
@@ -410,12 +410,17 @@ function main() {
 		])
 	);
 	const dominanceState = Object.fromEntries(
-		Object.keys(SENSITIVITY_PRESETS).map((sensitivity) => [
-			sensitivity,
-			{
-				counts: zeroCounts(),
-				sessionHits: Object.fromEntries(VISUAL_CHANNELS.map((channel) => [channel, 0]))
-			}
+		Object.keys(MODE_PRESETS).map((mode) => [
+			mode,
+			Object.fromEntries(
+				Object.keys(SENSITIVITY_PRESETS).map((sensitivity) => [
+					sensitivity,
+					{
+						counts: zeroCounts(),
+						sessionHits: Object.fromEntries(VISUAL_CHANNELS.map((channel) => [channel, 0]))
+					}
+				])
+			)
 		])
 	);
 
@@ -460,23 +465,31 @@ function main() {
 				}
 			])
 		);
-		const sensitivities = Object.fromEntries(
-			Object.entries(SENSITIVITY_PRESETS).map(([sensitivity, preset]) => [
-				sensitivity,
-				{
-					preset,
-					dominant: 'baseline',
-					dominance: 0,
-					seen: Object.fromEntries(VISUAL_CHANNELS.map((channel) => [channel, false]))
-				}
+		const dominanceModes = Object.fromEntries(
+			Object.entries(MODE_PRESETS).map(([mode, modePreset]) => [
+				mode,
+				Object.fromEntries(
+					Object.entries(SENSITIVITY_PRESETS).map(([sensitivity, sensitivityPreset]) => [
+						sensitivity,
+						{
+							modePreset,
+							sensitivityPreset,
+							dominant: 'baseline',
+							dominance: 0,
+							seen: Object.fromEntries(VISUAL_CHANNELS.map((channel) => [channel, false]))
+						}
+					])
+				)
 			])
 		);
 
 		for (let tick = 0; tick < sessionTicks; tick++) {
 			if (tick < bootTicks) {
-				for (const [sensitivity, state] of Object.entries(sensitivities)) {
-					dominanceState[sensitivity].counts.baseline++;
-					state.seen.baseline = true;
+				for (const [modeName, sensitivityStates] of Object.entries(dominanceModes)) {
+					for (const [sensitivity, state] of Object.entries(sensitivityStates)) {
+						dominanceState[modeName][sensitivity].counts.baseline++;
+						state.seen.baseline = true;
+					}
 				}
 				continue;
 			}
@@ -526,24 +539,26 @@ function main() {
 				mode.rawPulseActive = rawPulseActive;
 			}
 
-			for (const [sensitivity, state] of Object.entries(sensitivities)) {
-				const preset = state.preset;
-				const raw = {
-					parallel: Math.max(
-						strengthFromP(pCorrHigh, preset.channelPStart, preset.channelPFull),
-						strengthFromP(pCorrLow, preset.channelPStart, preset.channelPFull)
-					),
-					antiparallel: Math.max(
-						strengthFromP(pAntiAb, preset.channelPStart, preset.channelPFull),
-						strengthFromP(pAntiBa, preset.channelPStart, preset.channelPFull),
-						strengthFromP(pSeparate, preset.channelPStart, preset.channelPFull)
-					),
-					stick_together: strengthFromP(pClose, preset.channelPStart, preset.channelPFull),
-					pearson: strengthFromP(pPearson, preset.channelPStart, preset.channelPFull)
-				};
-				updateDominantState(state, raw, dtMs, preset, MODE_PRESETS.mellow);
-				dominanceState[sensitivity].counts[state.dominant]++;
-				state.seen[state.dominant] = true;
+			for (const [modeName, sensitivityStates] of Object.entries(dominanceModes)) {
+				for (const [sensitivity, state] of Object.entries(sensitivityStates)) {
+					const preset = state.sensitivityPreset;
+					const raw = {
+						parallel: Math.max(
+							strengthFromP(pCorrHigh, preset.channelPStart, preset.channelPFull),
+							strengthFromP(pCorrLow, preset.channelPStart, preset.channelPFull)
+						),
+						antiparallel: Math.max(
+							strengthFromP(pAntiAb, preset.channelPStart, preset.channelPFull),
+							strengthFromP(pAntiBa, preset.channelPStart, preset.channelPFull),
+							strengthFromP(pSeparate, preset.channelPStart, preset.channelPFull)
+						),
+						stick_together: strengthFromP(pClose, preset.channelPStart, preset.channelPFull),
+						pearson: strengthFromP(pPearson, preset.channelPStart, preset.channelPFull)
+					};
+					updateDominantState(state, raw, dtMs, preset, state.modePreset);
+					dominanceState[modeName][sensitivity].counts[state.dominant]++;
+					state.seen[state.dominant] = true;
+				}
 			}
 		}
 
@@ -556,9 +571,11 @@ function main() {
 			bucket.stage2PlusSeconds.push(mode.stage2PlusSeconds);
 			bucket.stage3Seconds.push(mode.stage3Seconds);
 		}
-		for (const [sensitivity, state] of Object.entries(sensitivities)) {
-			for (const [channel, seen] of Object.entries(state.seen)) {
-				if (seen) dominanceState[sensitivity].sessionHits[channel]++;
+		for (const [modeName, sensitivityStates] of Object.entries(dominanceModes)) {
+			for (const [sensitivity, state] of Object.entries(sensitivityStates)) {
+				for (const [channel, seen] of Object.entries(state.seen)) {
+					if (seen) dominanceState[modeName][sensitivity].sessionHits[channel]++;
+				}
 			}
 		}
 	}
@@ -587,16 +604,24 @@ function main() {
 			])
 		),
 		dominance: Object.fromEntries(
-			Object.entries(dominanceState).map(([sensitivity, bucket]) => [
-				sensitivity,
-				{
-					occupancy: Object.fromEntries(
-						Object.entries(bucket.counts).map(([channel, count]) => [channel, count / (options.sessions * sessionTicks)])
-					),
-					sessionHitRates: Object.fromEntries(
-						Object.entries(bucket.sessionHits).map(([channel, count]) => [channel, count / options.sessions])
-					)
-				}
+			Object.entries(dominanceState).map(([mode, sensitivityBuckets]) => [
+				mode,
+				Object.fromEntries(
+					Object.entries(sensitivityBuckets).map(([sensitivity, bucket]) => [
+						sensitivity,
+						{
+							occupancy: Object.fromEntries(
+								Object.entries(bucket.counts).map(([channel, count]) => [
+									channel,
+									count / (options.sessions * sessionTicks)
+								])
+							),
+							sessionHitRates: Object.fromEntries(
+								Object.entries(bucket.sessionHits).map(([channel, count]) => [channel, count / options.sessions])
+							)
+						}
+					])
+				)
 			])
 		)
 	};
